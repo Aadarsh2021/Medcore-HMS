@@ -1,6 +1,7 @@
 {
   "hosting": {
     "public": "apps/web/out",
+    "cleanUrls": true,
     "ignore": [
       "firebase.json",
       "**/.*",
@@ -12,9 +13,5 @@
         "destination": "/index.html"
       }
     ]
-  },
-  "apphosting": {
-    "target": "medcore-hms",
-    "rootDir": "apps/web"
   }
 }
