@@ -4,10 +4,10 @@ node_modules/
 
 # Environment Variables & Secrets
 .env
-.env.local
-.env.production
-.env.staging
+.env.*
 *.env
+**/.env
+**/.env.*
 
 # Build outputs
 dist/

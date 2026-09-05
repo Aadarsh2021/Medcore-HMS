@@ -1,0 +1,17 @@
+# Firebase App Hosting Configuration
+# https://firebase.google.com/docs/app-hosting/configure
+
+runConfig:
+  minInstances: 0
+  maxInstances: 5
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 1024
+
+env:
+  - variable: NEXT_PUBLIC_SUPABASE_URL
+    value: "https://ihpjezapyznhzbhxfrvu.supabase.co"
+  - variable: NEXT_PUBLIC_SUPABASE_ANON_KEY
+    value: "sb_publishable_4PWubQVpA5UHZMVJfmHHgA_HP0qBw9S"
+  - variable: NODE_ENV
+    value: "production"

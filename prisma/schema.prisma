@@ -226,6 +226,7 @@ model User {
   hospitalId      String?
   hospital        Hospital?        @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
   email           String           @unique
+  supabaseAuthId  String?          @unique
   passwordHash    String
   role            Role
   firstName       String

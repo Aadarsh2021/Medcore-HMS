@@ -15,6 +15,7 @@
     "db:seed": "pnpm --filter @medcore/api db:seed",
     "db:studio": "pnpm --filter @medcore/api db:studio",
     "db:ping": "pnpm --filter @medcore/api exec tsx ../../scripts/keep-alive.ts",
+    "auth:sync": "pnpm --filter @medcore/api exec tsx ../../scripts/sync-supabase-users.ts",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"
   },
