@@ -31,6 +31,7 @@ import {
   AmendmentType,
   AmendmentSection,
 } from '@medcore/types';
+import { PrescriptionSection } from '../../../components/clinical/PrescriptionSection';
 
 interface VitalForm {
   bpSystolic: string;
@@ -606,6 +607,14 @@ export default function DoctorClinicalWorkspacePage() {
                 </div>
               </div>
             </div>
+
+            {/* Electronic Prescription Management & Medication Orders (Phase 6) */}
+            <PrescriptionSection
+              encounterId="enc-7890-mgh"
+              doctorLicenseNumber={user?.role === 'DOCTOR' ? 'MCI-2018-78901' : 'MCI-2018-78901'}
+              doctorName={`${user?.firstName || 'Dr. Ananya'} ${user?.lastName || 'Iyer'}`}
+              isEncounterCompleted={isCompleted}
+            />
           </div>
 
           {/* Diagnoses, Attachments & Amendments (5 cols) */}

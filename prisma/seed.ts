@@ -18,6 +18,7 @@ async function main() {
   await prisma.labOrder.deleteMany();
   await prisma.labTest.deleteMany();
   await prisma.labCategory.deleteMany();
+  await prisma.prescriptionNumberCounter.deleteMany();
   await prisma.prescriptionItem.deleteMany();
   await prisma.prescription.deleteMany();
   await prisma.medicineBatch.deleteMany();
@@ -514,6 +515,55 @@ async function main() {
       unit: 'mg/dL (Total Cholesterol)',
     },
   });
+
+  // 11.1 Foundational Medicines Catalog (Phase 6)
+  console.log('Seeding Foundational Medicines Catalog (Phase 6)...');
+  const foundationalMedicines = [
+    { name: 'Paracetamol 500mg', genericName: 'Paracetamol', category: 'Analgesic', form: MedicineForm.TABLET, strength: '500 mg', manufacturer: 'Cipla Ltd' },
+    { name: 'Paracetamol 650mg', genericName: 'Paracetamol', category: 'Analgesic', form: MedicineForm.TABLET, strength: '650 mg', manufacturer: 'Micro Labs' },
+    { name: 'Ibuprofen 400mg', genericName: 'Ibuprofen', category: 'NSAID', form: MedicineForm.TABLET, strength: '400 mg', manufacturer: 'Abbott Healthcare' },
+    { name: 'Diclofenac 50mg', genericName: 'Diclofenac Sodium', category: 'NSAID', form: MedicineForm.TABLET, strength: '50 mg', manufacturer: 'Novartis' },
+    { name: 'Tramadol 50mg', genericName: 'Tramadol Hydrochloride', category: 'Opioid Analgesic', form: MedicineForm.CAPSULE, strength: '50 mg', manufacturer: 'Sun Pharma' },
+    { name: 'Amoxicillin 500mg', genericName: 'Amoxicillin', category: 'Antibiotic', form: MedicineForm.CAPSULE, strength: '500 mg', manufacturer: 'Alkem Laboratories' },
+    { name: 'Augmentin 625mg', genericName: 'Amoxicillin + Clavulanic Acid', category: 'Antibiotic', form: MedicineForm.TABLET, strength: '625 mg', manufacturer: 'GSK' },
+    { name: 'Azithromycin 500mg', genericName: 'Azithromycin', category: 'Macrolide Antibiotic', form: MedicineForm.TABLET, strength: '500 mg', manufacturer: 'Pfizer' },
+    { name: 'Ciprofloxacin 500mg', genericName: 'Ciprofloxacin', category: 'Fluoroquinolone', form: MedicineForm.TABLET, strength: '500 mg', manufacturer: 'Bayer' },
+    { name: 'Doxycycline 100mg', genericName: 'Doxycycline', category: 'Tetracycline', form: MedicineForm.CAPSULE, strength: '100 mg', manufacturer: 'USV Pvt Ltd' },
+    { name: 'Ceftriaxone 1g Injection', genericName: 'Ceftriaxone', category: 'Cephalosporin', form: MedicineForm.INJECTION, strength: '1 g', manufacturer: 'Aristo Pharmaceuticals' },
+    { name: 'Amlodipine 5mg', genericName: 'Amlodipine Besylate', category: 'Calcium Channel Blocker', form: MedicineForm.TABLET, strength: '5 mg', manufacturer: 'Pfizer' },
+    { name: 'Telmisartan 40mg', genericName: 'Telmisartan', category: 'ARB Antihypertensive', form: MedicineForm.TABLET, strength: '40 mg', manufacturer: 'Glenmark' },
+    { name: 'Losartan 50mg', genericName: 'Losartan Potassium', category: 'ARB Antihypertensive', form: MedicineForm.TABLET, strength: '50 mg', manufacturer: 'Torrent Pharma' },
+    { name: 'Atenolol 50mg', genericName: 'Atenolol', category: 'Beta Blocker', form: MedicineForm.TABLET, strength: '50 mg', manufacturer: 'AstraZeneca' },
+    { name: 'Atorvastatin 10mg', genericName: 'Atorvastatin', category: 'Lipid Lowering', form: MedicineForm.TABLET, strength: '10 mg', manufacturer: 'Ranbaxy' },
+    { name: 'Atorvastatin 20mg', genericName: 'Atorvastatin', category: 'Lipid Lowering', form: MedicineForm.TABLET, strength: '20 mg', manufacturer: 'Sun Pharma' },
+    { name: 'Clopidogrel 75mg', genericName: 'Clopidogrel', category: 'Antiplatelet', form: MedicineForm.TABLET, strength: '75 mg', manufacturer: 'Sanofi' },
+    { name: 'Metformin 500mg', genericName: 'Metformin Hydrochloride', category: 'Antidiabetic', form: MedicineForm.TABLET, strength: '500 mg', manufacturer: 'USV Pvt Ltd' },
+    { name: 'Metformin 1000mg ER', genericName: 'Metformin Hydrochloride', category: 'Antidiabetic', form: MedicineForm.TABLET, strength: '1000 mg', manufacturer: 'USV Pvt Ltd' },
+    { name: 'Glimepiride 1mg', genericName: 'Glimepiride', category: 'Sulfonylurea', form: MedicineForm.TABLET, strength: '1 mg', manufacturer: 'Sanofi' },
+    { name: 'Glimepiride 2mg', genericName: 'Glimepiride', category: 'Sulfonylurea', form: MedicineForm.TABLET, strength: '2 mg', manufacturer: 'Sanofi' },
+    { name: 'Human Actrapid 40IU/ml', genericName: 'Regular Soluble Insulin', category: 'Insulin', form: MedicineForm.INJECTION, strength: '40 IU/ml', manufacturer: 'Novo Nordisk' },
+    { name: 'Omeprazole 20mg', genericName: 'Omeprazole', category: 'Proton Pump Inhibitor', form: MedicineForm.CAPSULE, strength: '20 mg', manufacturer: 'Dr. Reddy\'s' },
+    { name: 'Pantoprazole 40mg', genericName: 'Pantoprazole', category: 'Proton Pump Inhibitor', form: MedicineForm.TABLET, strength: '40 mg', manufacturer: 'Alkem Laboratories' },
+    { name: 'Ranitidine 150mg', genericName: 'Ranitidine', category: 'H2 Blocker', form: MedicineForm.TABLET, strength: '150 mg', manufacturer: 'JB Chemicals' },
+    { name: 'Ondansetron 4mg', genericName: 'Ondansetron', category: 'Antiemetic', form: MedicineForm.TABLET, strength: '4 mg', manufacturer: 'GlaxoSmithKline' },
+    { name: 'Domperidone 10mg', genericName: 'Domperidone', category: 'Prokinetic Antiemetic', form: MedicineForm.TABLET, strength: '10 mg', manufacturer: 'Torrent Pharma' },
+    { name: 'Salbutamol Inhaler 100mcg', genericName: 'Salbutamol', category: 'Bronchodilator', form: MedicineForm.INHALER, strength: '100 mcg/puff', manufacturer: 'Cipla Ltd' },
+    { name: 'Budesonide Inhaler 200mcg', genericName: 'Budesonide', category: 'Corticosteroid', form: MedicineForm.INHALER, strength: '200 mcg/puff', manufacturer: 'Cipla Ltd' },
+    { name: 'Montelukast 10mg', genericName: 'Montelukast Sodium', category: 'Leukotriene Antagonist', form: MedicineForm.TABLET, strength: '10 mg', manufacturer: 'Sun Pharma' },
+    { name: 'Cetirizine 10mg', genericName: 'Cetirizine Hydrochloride', category: 'Antihistamine', form: MedicineForm.TABLET, strength: '10 mg', manufacturer: 'Dr. Reddy\'s' },
+    { name: 'Levocetirizine 5mg', genericName: 'Levocetirizine', category: 'Antihistamine', form: MedicineForm.TABLET, strength: '5 mg', manufacturer: 'Hetero Healthcare' },
+    { name: 'Becosules Z Multivitamin', genericName: 'Vitamin B-Complex + Zinc', category: 'Nutritional Supplement', form: MedicineForm.CAPSULE, strength: 'Standard', manufacturer: 'Pfizer' },
+    { name: 'Shelcal 500', genericName: 'Calcium Carbonate + Vitamin D3', category: 'Mineral Supplement', form: MedicineForm.TABLET, strength: '500 mg + 250 IU', manufacturer: 'Torrent Pharma' },
+  ];
+
+  for (const med of foundationalMedicines) {
+    await prisma.medicine.create({
+      data: {
+        hospitalId: hospitalMetro.id,
+        ...med,
+      },
+    });
+  }
 
   // 12. Completed Clinical Encounter Workflow for Patient 1 (Arjun Mehta)
   console.log('Seeding Completed Clinical Encounter (Arjun Mehta)...');

@@ -114,6 +114,7 @@ enum PrescriptionFrequency {
 }
 
 enum PrescriptionStatus {
+  DRAFT
   ISSUED
   DISPENSED
   CANCELLED
@@ -223,6 +224,7 @@ model Hospital {
   encounters       PatientEncounter[]
   medicalRecords   MedicalRecord[]
   prescriptions    Prescription[]
+  prescriptionCounters PrescriptionNumberCounter[]
   medicines        Medicine[]
   labCategories    LabCategory[]
   labTests         LabTest[]
@@ -633,43 +635,72 @@ model MedicalRecordAmendment {
 // ------------------------------------------------------------------------------
 
 model Prescription {
-  id           String             @id @default(uuid())
-  hospitalId   String
-  hospital     Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
-  encounterId  String             @unique
-  encounter    PatientEncounter   @relation(fields: [encounterId], references: [id], onDelete: Cascade)
-  patientId    String
-  patient      Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  doctorId     String
-  doctor       Doctor             @relation(fields: [doctorId], references: [id], onDelete: Cascade)
-  notes        String?
-  signedPdfUrl String?
-  status       PrescriptionStatus @default(ISSUED)
+  id                  String             @id @default(uuid())
+  hospitalId          String
+  hospital            Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  encounterId         String             @unique
+  encounter           PatientEncounter   @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  patientId           String
+  patient             Patient            @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId            String
+  doctor              Doctor             @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  prescriptionNumber  String?
+  notes               String?
+  signedPdfUrl        String?
+  pdfStorageKey       String?
+  pdfGeneratedAt      DateTime?
+  pdfSha256           String?
+  pdfGenerationStatus String?            @default("PENDING")
+  status              PrescriptionStatus @default(DRAFT)
+  issuedAt            DateTime?
+  voidedAt            DateTime?
+  voidReason          String?
+  voidedById          String?
 
-  items        PrescriptionItem[]
+  items               PrescriptionItem[]
 
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
 
+  @@unique([hospitalId, prescriptionNumber])
   @@index([hospitalId, patientId])
+  @@index([hospitalId, status])
 }
 
 model PrescriptionItem {
   id                String                @id @default(uuid())
   prescriptionId    String
   prescription      Prescription          @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
-  medicineId        String
-  medicine          Medicine              @relation(fields: [medicineId], references: [id])
+  medicineId        String?
+  medicine          Medicine?             @relation(fields: [medicineId], references: [id], onDelete: SetNull)
+  medicineName      String
+  form              MedicineForm          @default(TABLET)
+  strength          String?
   dosage            String
   frequency         PrescriptionFrequency @default(BD)
   durationDays      Int                   @default(5)
   route             String                @default("ORAL")
   instructions      String?
+  quantity          Int?
   dispensedQuantity Int                   @default(0)
 
   createdAt         DateTime              @default(now())
 
   @@index([prescriptionId])
+}
+
+model PrescriptionNumberCounter {
+  id         String   @id @default(uuid())
+  hospitalId String
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  year       Int
+  nextValue  Int      @default(1)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([hospitalId, year])
+  @@index([hospitalId])
 }
 
 model Medicine {

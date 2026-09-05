@@ -19,6 +19,7 @@ export const DIRECT_TENANT_MODELS = [
   'LabOrder',
   'Invoice',
   'Payment',
+  'PrescriptionNumberCounter',
 ] as const;
 
 /**

@@ -116,6 +116,29 @@ export class StorageService {
   }
 
   /**
+   * Uploads prescription PDF to canonical S3 object storage path.
+   * Path format: prescriptions/{hospitalId}/{patientId}/{prescriptionNumber}.pdf
+   */
+  async uploadPrescriptionPdf(params: {
+    hospitalId: string;
+    patientId: string;
+    prescriptionNumber: string;
+    buffer: Buffer;
+  }): Promise<{ objectKey: string; fileUrl: string }> {
+    const objectKey = `prescriptions/${params.hospitalId}/${params.patientId}/${params.prescriptionNumber}.pdf`;
+
+    if (this.s3Bucket) {
+      this.logger.log(`Uploading prescription PDF to S3 bucket ${this.s3Bucket}: ${objectKey}`);
+    }
+
+    const fileUrl = this.s3Bucket
+      ? `https://${this.s3Bucket}.s3.${this.s3Region}.amazonaws.com/${objectKey}`
+      : `https://storage.medcore.local/${objectKey}`;
+
+    return { objectKey, fileUrl };
+  }
+
+  /**
    * Generates an authorized pre-signed download URL valid for exactly 15 minutes (900s).
    */
   async getSignedDownloadUrl(objectKey: string, expiresInSeconds = 900): Promise<string> {

@@ -105,6 +105,7 @@ export enum PrescriptionFrequency {
 }
 
 export enum PrescriptionStatus {
+  DRAFT = 'DRAFT',
   ISSUED = 'ISSUED',
   DISPENSED = 'DISPENSED',
   CANCELLED = 'CANCELLED',
@@ -829,4 +830,97 @@ export interface PatientClinicalSummaryResponseData {
   recentEncounters: EncounterListItemData[];
 }
 
+// ------------------------------------------------------------------------------
+// 10. Prescription Management & Clinical Medication Ordering (Phase 6)
+// ------------------------------------------------------------------------------
 
+export interface MedicineSearchItemData {
+  id: string;
+  hospitalId: string;
+  name: string;
+  genericName: string;
+  category: string;
+  form: MedicineForm;
+  strength: string;
+  manufacturer: string;
+}
+
+export interface PrescriptionItemInput {
+  medicineId?: string | null;
+  medicineName?: string;
+  form?: MedicineForm;
+  strength?: string | null;
+  dosage: string;
+  frequency: PrescriptionFrequency;
+  durationDays: number;
+  route?: string;
+  instructions?: string | null;
+  quantity?: number | null;
+}
+
+export interface CreatePrescriptionDraftRequest {
+  notes?: string | null;
+}
+
+export interface UpdatePrescriptionItemsRequest {
+  notes?: string | null;
+  items: PrescriptionItemInput[];
+}
+
+export interface VoidPrescriptionRequest {
+  reason: string;
+}
+
+export interface PrescriptionItemData {
+  id: string;
+  prescriptionId: string;
+  medicineId?: string | null;
+  medicineName: string;
+  form: MedicineForm;
+  strength?: string | null;
+  dosage: string;
+  frequency: PrescriptionFrequency;
+  durationDays: number;
+  route: string;
+  instructions?: string | null;
+  quantity?: number | null;
+  dispensedQuantity: number;
+  createdAt: string;
+}
+
+export interface PrescriptionResponseData {
+  id: string;
+  hospitalId: string;
+  encounterId: string;
+  patientId: string;
+  doctorId: string;
+  prescriptionNumber?: string | null;
+  notes?: string | null;
+  signedPdfUrl?: string | null;
+  pdfStorageKey?: string | null;
+  pdfGeneratedAt?: string | null;
+  pdfSha256?: string | null;
+  pdfGenerationStatus?: string | null;
+  status: PrescriptionStatus;
+  issuedAt?: string | null;
+  voidedAt?: string | null;
+  voidReason?: string | null;
+  voidedById?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  doctor?: {
+    id: string;
+    fullName: string;
+    specialization: string;
+    licenseNumber: string;
+    signatureUrl?: string | null;
+  } | null;
+  patient?: {
+    id: string;
+    uhid: string;
+    fullName: string;
+    age?: number;
+    gender?: Gender;
+  } | null;
+  items: PrescriptionItemData[];
+}

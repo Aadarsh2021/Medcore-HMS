@@ -8,6 +8,8 @@ import { DoctorsModule } from './modules/doctors/doctors.module';
 import { AppointmentsModule } from './modules/appointments/appointments.module';
 import { EncountersModule } from './modules/encounters/encounters.module';
 import { MedicalRecordsModule } from './modules/medical-records/medical-records.module';
+import { MedicinesModule } from './modules/medicines/medicines.module';
+import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { StorageModule } from './common/storage/storage.module';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 
@@ -25,6 +27,8 @@ import { TenantContextInterceptor } from './common/interceptors/tenant-context.i
     AppointmentsModule,
     EncountersModule,
     MedicalRecordsModule,
+    MedicinesModule,
+    PrescriptionsModule,
   ],
   providers: [
     {

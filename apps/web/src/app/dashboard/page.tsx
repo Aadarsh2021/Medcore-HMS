@@ -20,6 +20,7 @@ import {
   Users,
 } from 'lucide-react';
 import { UserRole } from '@medcore/types';
+import { PatientPrescriptionHistory } from '../../components/patient/PatientPrescriptionHistory';
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -260,6 +261,9 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+
+        {/* Patient Prescriptions & Clinical Orders History (Phase 6) */}
+        <PatientPrescriptionHistory />
       </main>
     </div>
   );
