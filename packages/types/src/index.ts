@@ -240,3 +240,94 @@ export function calculateBMI(heightCm: number, weightKg: number): number {
   const bmi = weightKg / (heightM * heightM);
   return Math.round(bmi * 10) / 10;
 }
+
+// ------------------------------------------------------------------------------
+// 6. Patient Contracts
+// ------------------------------------------------------------------------------
+export interface AddressDto {
+  street: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  country?: string;
+}
+
+export interface EmergencyContactDto {
+  name: string;
+  phone: string;
+  relation: string;
+}
+
+export interface CreatePatientRequest {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+  dateOfBirth: string;
+  gender: Gender;
+  bloodGroup?: BloodGroup;
+  allergiesSummary?: string;
+  emergencyContact?: EmergencyContactDto;
+  address?: AddressDto;
+}
+
+export interface UpdatePatientRequest {
+  firstName?: string;
+  lastName?: string;
+  phone?: string;
+  dateOfBirth?: string;
+  gender?: Gender;
+  bloodGroup?: BloodGroup;
+  allergiesSummary?: string;
+  emergencyContact?: EmergencyContactDto;
+  address?: AddressDto;
+}
+
+export interface PatientResponseData {
+  id: string;
+  uhid: string;
+  hospitalId: string;
+  dateOfBirth: string;
+  gender: Gender;
+  bloodGroup?: BloodGroup | null;
+  allergiesSummary?: string | null;
+  emergencyContactName?: string | null;
+  emergencyContactPhone?: string | null;
+  emergencyContactRelation?: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string | null;
+  user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    phone?: string | null;
+    avatarUrl?: string | null;
+    isActive: boolean;
+  };
+  address?: {
+    id: string;
+    street: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: string;
+  } | null;
+}
+
+export interface PatientListItemData {
+  id: string;
+  uhid: string;
+  hospitalId: string;
+  fullName: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string | null;
+  dateOfBirth: string;
+  gender: Gender;
+  bloodGroup?: BloodGroup | null;
+  createdAt: string;
+}
+

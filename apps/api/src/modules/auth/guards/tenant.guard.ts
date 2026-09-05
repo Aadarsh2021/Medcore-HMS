@@ -5,10 +5,13 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { UserRole } from '@medcore/types';
+import { PrismaService } from '../../../database/prisma.service';
 
 @Injectable()
 export class TenantGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
     const user = request.user;
 
@@ -16,11 +19,25 @@ export class TenantGuard implements CanActivate {
       return true; // SupabaseAuthGuard handles unauthenticated requests
     }
 
-    // SUPER_ADMIN can operate across all tenants, and optionally override via header
+    // SUPER_ADMIN can operate across all tenants with an explicit target header
     if (user.role === UserRole.SUPER_ADMIN) {
-      const overrideHeader = request.headers['x-hospital-id'];
+      const overrideHeader = request.headers['x-hospital-id'] as string | undefined;
       if (overrideHeader) {
-        request.hospitalId = overrideHeader;
+        // Validate target hospital exists and is active
+        const targetHospital = await this.prisma.raw.hospital.findUnique({
+          where: { id: overrideHeader },
+          select: { id: true, status: true },
+        });
+
+        if (!targetHospital || targetHospital.status !== 'ACTIVE') {
+          throw new ForbiddenException(
+            `Invalid target hospital specified in X-Hospital-Id: Facility does not exist or is inactive.`,
+          );
+        }
+
+        request.hospitalId = targetHospital.id;
+      } else {
+        request.hospitalId = null;
       }
       return true;
     }
@@ -37,9 +54,10 @@ export class TenantGuard implements CanActivate {
       );
     }
 
-    // Ensure hospitalId is always pinned on the request
+    // Ensure hospitalId is always pinned strictly from authenticated user profile
     request.hospitalId = user.hospitalId;
 
     return true;
   }
 }
+
