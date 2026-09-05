@@ -29,6 +29,10 @@ import {
   PatientVitalsQueryDto,
 } from './dto/patient-query.dto';
 
+/**
+ * MedicalRecordsService manages longitudinal patient health records,
+ * clinical summaries, allergies, medications, immunizations, and family histories.
+ */
 @Injectable()
 export class MedicalRecordsService {
   private readonly logger = new Logger(MedicalRecordsService.name);

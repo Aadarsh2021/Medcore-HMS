@@ -26,6 +26,10 @@ import { AddDiagnosisDto } from './dto/add-diagnosis.dto';
 import { UpdateClinicalNotesDto } from './dto/update-clinical-notes.dto';
 import { CreateAmendmentDto } from './dto/create-amendment.dto';
 
+/**
+ * EncountersService orchestrates clinical encounters, vitals, diagnoses,
+ * atomic finalization, and additive historical amendments.
+ */
 @Injectable()
 export class EncountersService {
   private readonly logger = new Logger(EncountersService.name);
