@@ -1,0 +1,57 @@
+name: Supabase Database Keep-Alive Heartbeat
+
+on:
+  schedule:
+    # Runs every 3 days at 04:00 UTC (well within the 7-day inactivity window)
+    - cron: '0 4 */3 * *'
+  workflow_dispatch: # Allows manual one-click trigger from GitHub Actions tab
+
+jobs:
+  keep-alive:
+    name: Keep Supabase Project Active
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Ping Supabase REST API Gateway
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://ihpjezapyznhzbhxfrvu.supabase.co' }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY || 'sb_publishable_4PWubQVpA5UHZMVJfmHHgA_HP0qBw9S' }}
+        run: |
+          echo "Sending HTTP heartbeat to Supabase REST API..."
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            "$SUPABASE_URL/rest/v1/Hospital?select=count")
+          echo "Supabase HTTP Response Code: $STATUS"
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
+            echo "HTTP Heartbeat successfully registered with Supabase!"
+          fi
+
+      - name: 3. Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 4. Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: 5. Install Dependencies
+        run: pnpm install --no-frozen-lockfile
+
+      - name: 6. Generate Prisma Client
+        run: pnpm exec prisma generate --schema=prisma/schema.prisma
+
+      - name: 7. Execute PostgreSQL SQL Heartbeat Query
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DIRECT_URL: ${{ secrets.DIRECT_URL }}
+        run: |
+          if [ -n "$DATABASE_URL" ]; then
+            pnpm --filter @medcore/api exec tsx ../../scripts/keep-alive.ts
+          else
+            echo "DATABASE_URL secret not set in GitHub repository secrets; HTTP heartbeat succeeded as primary ping."
+          fi

@@ -1,0 +1,43 @@
+{
+  "name": "medcore-hms",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MedCore HMS — Production Hospital Management System",
+  "scripts": {
+    "dev:api": "pnpm --filter @medcore/api start:dev",
+    "dev:web": "pnpm --filter @medcore/web dev",
+    "build": "pnpm --filter @medcore/types build && pnpm --filter @medcore/api build && pnpm --filter @medcore/web build",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "db:generate": "pnpm --filter @medcore/api db:generate",
+    "db:push": "pnpm --filter @medcore/api db:push",
+    "db:migrate": "pnpm --filter @medcore/api db:migrate",
+    "db:seed": "pnpm --filter @medcore/api db:seed",
+    "db:studio": "pnpm --filter @medcore/api db:studio",
+    "db:ping": "pnpm --filter @medcore/api exec tsx ../../scripts/keep-alive.ts",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  },
+  "keywords": [
+    "hospital-management",
+    "ehr",
+    "emr",
+    "healthcare",
+    "nestjs",
+    "nextjs",
+    "prisma",
+    "postgresql",
+    "multi-tenant"
+  ],
+  "author": "MedCore Engineering Team",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "@prisma/client": "6.4.1"
+  },
+  "devDependencies": {
+    "dotenv": "^16.6.1",
+    "prettier": "^3.5.2",
+    "prisma": "6.4.1",
+    "typescript": "^5.8.2"
+  }
+}
