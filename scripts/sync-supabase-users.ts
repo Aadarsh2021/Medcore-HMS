@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, User as SupabaseUser } from '@supabase/supabase-js';
 import * as dotenv from 'dotenv';
 dotenv.config();
 
@@ -38,7 +38,7 @@ async function main() {
     process.exit(1);
   }
 
-  const existingAuthUsers = listData.users || [];
+  const existingAuthUsers: SupabaseUser[] = listData.users || [];
   console.log(`Current existing users in Supabase Auth: ${existingAuthUsers.length}`);
 
   let createdCount = 0;
@@ -46,7 +46,7 @@ async function main() {
 
   for (const dbUser of dbUsers) {
     const email = dbUser.email.toLowerCase();
-    let authUser = existingAuthUsers.find((u) => u.email?.toLowerCase() === email);
+    let authUser = existingAuthUsers.find((u: SupabaseUser) => u.email?.toLowerCase() === email);
 
     if (!authUser) {
       console.log(`Creating Supabase Auth user for [${dbUser.role}]: ${email}`);

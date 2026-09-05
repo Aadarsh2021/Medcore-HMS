@@ -12,6 +12,9 @@ importers:
         specifier: 6.4.1
         version: 6.4.1(prisma@6.4.1(supports-color@8.1.1)(typescript@5.9.3))(typescript@5.9.3)
     devDependencies:
+      '@supabase/supabase-js':
+        specifier: ^2.115.0
+        version: 2.115.0
       dotenv:
         specifier: ^16.6.1
         version: 16.6.1
