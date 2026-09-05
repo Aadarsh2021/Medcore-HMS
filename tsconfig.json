@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@prisma/client": ["node_modules/.prisma/client"],
+      "@prisma/client/*": ["node_modules/.prisma/client/*"],
+      "@medcore/types": ["packages/types/src"],
+      "@medcore/types/*": ["packages/types/src/*"]
+    },
+    "skipLibCheck": true,
+    "strict": false
+  },
+  "exclude": ["node_modules", "dist", ".next"]
+}
