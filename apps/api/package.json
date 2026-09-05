@@ -36,6 +36,7 @@
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.4.7",
     "helmet": "^8.0.0",
+    "ioredis": "^6.0.0",
     "passport": "^0.7.0",
     "passport-jwt": "^4.0.1",
     "reflect-metadata": "^0.2.2",
@@ -78,4 +79,3 @@
     "testTimeout": 30000
   }
 }
-

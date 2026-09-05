@@ -4,6 +4,11 @@ import { APP_INTERCEPTOR } from '@nestjs/core';
 import { DatabaseModule } from './database/database.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { PatientsModule } from './modules/patients/patients.module';
+import { DoctorsModule } from './modules/doctors/doctors.module';
+import { AppointmentsModule } from './modules/appointments/appointments.module';
+import { EncountersModule } from './modules/encounters/encounters.module';
+import { MedicalRecordsModule } from './modules/medical-records/medical-records.module';
+import { StorageModule } from './common/storage/storage.module';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 
 @Module({
@@ -13,8 +18,13 @@ import { TenantContextInterceptor } from './common/interceptors/tenant-context.i
       envFilePath: ['../../.env', '.env'],
     }),
     DatabaseModule,
+    StorageModule,
     AuthModule,
     PatientsModule,
+    DoctorsModule,
+    AppointmentsModule,
+    EncountersModule,
+    MedicalRecordsModule,
   ],
   providers: [
     {
@@ -24,5 +34,3 @@ import { TenantContextInterceptor } from './common/interceptors/tenant-context.i
   ],
 })
 export class AppModule {}
-
-

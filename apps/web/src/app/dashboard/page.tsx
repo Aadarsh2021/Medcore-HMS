@@ -238,7 +238,10 @@ export default function DashboardPage() {
               Quick Actions
             </h2>
             <div className="grid grid-cols-1 gap-2.5">
-              <button className="w-full text-left p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors flex items-center gap-3 text-xs sm:text-sm font-medium">
+              <button
+                onClick={() => router.push('/dashboard/clinical')}
+                className="w-full text-left p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors flex items-center gap-3 text-xs sm:text-sm font-medium"
+              >
                 <FileText className="w-4 h-4 text-teal-600" />
                 <span>Start New Clinical Encounter</span>
               </button>

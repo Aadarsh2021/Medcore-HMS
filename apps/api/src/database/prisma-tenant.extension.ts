@@ -53,7 +53,27 @@ export const INDIRECT_TENANT_MODELS: Record<
     parentIdField: 'patientId',
     parentModel: 'Patient',
   },
+  VaccinationHistory: {
+    relation: 'patient',
+    parentIdField: 'patientId',
+    parentModel: 'Patient',
+  },
+  FamilyHistory: {
+    relation: 'patient',
+    parentIdField: 'patientId',
+    parentModel: 'Patient',
+  },
+  MedicationHistory: {
+    relation: 'patient',
+    parentIdField: 'patientId',
+    parentModel: 'Patient',
+  },
   Attachment: {
+    relation: 'record',
+    parentIdField: 'recordId',
+    parentModel: 'MedicalRecord',
+  },
+  MedicalRecordAmendment: {
     relation: 'record',
     parentIdField: 'recordId',
     parentModel: 'MedicalRecord',
@@ -93,6 +113,7 @@ export const RELATION_TENANT_CONSTRAINTS: Record<
   string,
   Array<{ field: string; parentModel: string }>
 > = {
+  Doctor: [{ field: 'departmentId', parentModel: 'Department' }],
   Appointment: [
     { field: 'patientId', parentModel: 'Patient' },
     { field: 'doctorId', parentModel: 'Doctor' },

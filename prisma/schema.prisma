@@ -10,6 +10,7 @@ datasource db {
 
 generator client {
   provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
 }
 
 // ------------------------------------------------------------------------------
@@ -76,6 +77,19 @@ enum AllergySeverity {
   MILD
   MODERATE
   SEVERE
+}
+
+enum AmendmentType {
+  ADDENDUM
+  CORRECTION
+  LATE_ENTRY
+}
+
+enum AmendmentSection {
+  CLINICAL_NOTES
+  DIAGNOSIS
+  TREATMENT_PLAN
+  OTHER
 }
 
 enum MedicineForm {
@@ -312,6 +326,7 @@ model Doctor {
   medicalRecords  MedicalRecord[]
   prescriptions   Prescription[]
   labOrders       LabOrder[]
+  amendments      MedicalRecordAmendment[]
 
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
@@ -379,6 +394,9 @@ model Patient {
   labOrders               LabOrder[]
   invoices                Invoice[]
   allergies               Allergy[]
+  vaccinations            VaccinationHistory[]
+  familyHistories         FamilyHistory[]
+  medicationHistories     MedicationHistory[]
 
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
@@ -469,6 +487,10 @@ model MedicalRecord {
   diagnoses          Diagnosis[]
   allergies          Allergy[]
   attachments        Attachment[]
+  amendments         MedicalRecordAmendment[]
+  vaccinations       VaccinationHistory[]
+  familyHistories    FamilyHistory[]
+  medicationHistories MedicationHistory[]
 
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
@@ -537,6 +559,71 @@ model Attachment {
   fileType   String
   fileSize   Int
   uploadedAt DateTime      @default(now())
+
+  @@index([recordId])
+}
+
+model VaccinationHistory {
+  id               String         @id @default(uuid())
+  patientId        String
+  patient          Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  recordId         String?
+  record           MedicalRecord? @relation(fields: [recordId], references: [id], onDelete: SetNull)
+  vaccineName      String
+  administeredDate DateTime
+  batchNumber      String?
+  nextDueDate      DateTime?
+  notes            String?
+  createdAt        DateTime       @default(now())
+
+  @@index([patientId])
+}
+
+model FamilyHistory {
+  id           String         @id @default(uuid())
+  patientId    String
+  patient      Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  recordId     String?
+  record       MedicalRecord? @relation(fields: [recordId], references: [id], onDelete: SetNull)
+  condition    String         // e.g. "Diabetes", "Hypertension", "Cancer", "Cardiac"
+  relationship String         // e.g. "Father", "Mother", "Sibling", "Grandparent"
+  notes        String?
+  createdAt    DateTime       @default(now())
+
+  @@index([patientId])
+}
+
+model MedicationHistory {
+  id             String         @id @default(uuid())
+  patientId      String
+  patient        Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  recordId       String?
+  record         MedicalRecord? @relation(fields: [recordId], references: [id], onDelete: SetNull)
+  medicationName String
+  dosage         String         // e.g. "500mg"
+  frequency      String         // e.g. "Once daily", "BD"
+  route          String?        // e.g. "Oral"
+  startDate      DateTime?
+  endDate        DateTime?
+  isActive       Boolean        @default(true)
+  notes          String?
+  createdAt      DateTime       @default(now())
+
+  @@index([patientId])
+}
+
+model MedicalRecordAmendment {
+  id              String           @id @default(uuid())
+  recordId        String
+  record          MedicalRecord    @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  amendedById     String
+  amendedBy       Doctor           @relation(fields: [amendedById], references: [id], onDelete: Cascade)
+  amendmentNumber Int
+  amendmentType   AmendmentType    @default(ADDENDUM)
+  section         AmendmentSection @default(CLINICAL_NOTES)
+  reason          String
+  content         String
+  createdAt       DateTime         @default(now())
 
   @@index([recordId])
 }
