@@ -16,6 +16,7 @@
     "db:studio": "pnpm --filter @medcore/api db:studio",
     "db:ping": "pnpm --filter @medcore/api exec tsx ../../scripts/keep-alive.ts",
     "auth:sync": "pnpm --filter @medcore/api exec tsx ../../scripts/sync-supabase-users.ts",
+    "deploy:firebase": "pnpm --filter @medcore/web build && npx firebase-tools deploy --only hosting --non-interactive --project medcore-hms-eea8e",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down"
   },

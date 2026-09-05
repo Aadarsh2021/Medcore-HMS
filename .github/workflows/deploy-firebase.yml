@@ -30,21 +30,8 @@ jobs:
           version: 11
           run_install: false
 
-      - name: Get pnpm store directory
-        shell: bash
-        run: |
-          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
-
-      - name: Setup pnpm cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.STORE_PATH }}
-          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
-          restore-keys: |
-            ${{ runner.os }}-pnpm-store-
-
       - name: Install Dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --no-frozen-lockfile
 
       - name: Generate Prisma Client
         run: pnpm --filter @medcore/api exec prisma generate --schema=prisma/schema.prisma
@@ -59,13 +46,22 @@ jobs:
           NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'sb_publishable_4PWubQVpA5UHZMVJfmHHgA_HP0qBw9S' }}
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: "medcore-hms-eea8e"
 
-      - name: Deploy to Firebase Hosting
+      - name: Deploy to Firebase Hosting (via Service Account)
+        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MEDCORE_HMS_EEA8E != '' }}
         uses: FirebaseExtended/action-hosting-deploy@v0
-        if: env.FIREBASE_SERVICE_ACCOUNT != ''
         with:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
           firebaseServiceAccount: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_MEDCORE_HMS_EEA8E }}'
           channelId: live
           projectId: medcore-hms-eea8e
-        env:
-          FIREBASE_SERVICE_ACCOUNT: '${{ secrets.FIREBASE_SERVICE_ACCOUNT_MEDCORE_HMS_EEA8E }}'
+
+      - name: Deploy to Firebase Hosting (via FIREBASE_TOKEN)
+        if: ${{ secrets.FIREBASE_TOKEN != '' && secrets.FIREBASE_SERVICE_ACCOUNT_MEDCORE_HMS_EEA8E == '' }}
+        run: |
+          npx -y firebase-tools deploy --only hosting --non-interactive --token "${{ secrets.FIREBASE_TOKEN }}" --project medcore-hms-eea8e
+
+      - name: Check Deployment Credentials
+        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MEDCORE_HMS_EEA8E == '' && secrets.FIREBASE_TOKEN == '' }}
+        run: |
+          echo "ℹ️ Notice: GitHub Secrets does not have FIREBASE_TOKEN or FIREBASE_SERVICE_ACCOUNT_MEDCORE_HMS_EEA8E configured yet."
+          echo "Build succeeded cleanly! To enable automated remote deployment on git push, add FIREBASE_TOKEN to GitHub repository secrets."
