@@ -1,270 +1,613 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../stores/authStore';
+import { AppShell } from '../../components/layout/AppShell';
+import { PageHeader } from '../../components/layout/PageHeader';
+import { StatCard } from '../../components/ui/StatCard';
+import { Button } from '../../components/ui/Button';
+import { Badge } from '../../components/ui/Badge';
+import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../components/ui/Card';
 import {
-  Activity,
-  Building2,
   Calendar,
-  ClipboardList,
-  CreditCard,
-  FileText,
-  HeartPulse,
-  LogOut,
-  Pill,
-  ShieldCheck,
+  Clock,
+  UserPlus,
   Stethoscope,
-  TestTube2,
-  User,
-  Users,
+  Pill,
+  FlaskConical,
+  Receipt,
+  ArrowRight,
+  Activity,
+  HeartPulse,
+  AlertTriangle,
+  FileText,
+  Building2,
+  CheckCircle2,
+  Download,
 } from 'lucide-react';
+import { appointmentsService, AppointmentRecord } from '../../lib/api/appointments.service';
 import { UserRole } from '@medcore/types';
-import { PatientPrescriptionHistory } from '../../components/patient/PatientPrescriptionHistory';
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user, session, logout, isInitialized, init } = useAuthStore();
+  const { user } = useAuthStore();
+  const [appointments, setAppointments] = useState<AppointmentRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    init();
-  }, [init]);
-
-  useEffect(() => {
-    if (isInitialized && !user && !session) {
-      router.push('/login');
+    async function loadData() {
+      try {
+        const aptRes = await appointmentsService.list();
+        setAppointments(aptRes.items);
+      } finally {
+        setIsLoading(false);
+      }
     }
-  }, [isInitialized, user, session, router]);
+    loadData();
+  }, []);
 
-  const handleSignOut = async () => {
-    await logout();
-    router.push('/login');
-  };
+  const role = user?.role || UserRole.DOCTOR;
+  const isDoctor = role === UserRole.DOCTOR;
+  const isNurse = role === UserRole.NURSE;
+  const isPharmacist = role === UserRole.PHARMACIST;
+  const isPatient = role === UserRole.PATIENT;
 
-  if (!user && !session) {
+  // Format today's date
+  const todayFormatted = new Intl.DateTimeFormat('en-US', {
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date());
+
+  if (isPatient) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <div className="text-center">
-          <Activity className="w-10 h-10 text-teal-600 animate-spin mx-auto mb-3" />
-          <p className="text-slate-600 dark:text-slate-400 text-sm">Loading MedCore Clinical Session...</p>
+      <AppShell>
+        <div className="space-y-6">
+          <PageHeader
+            title={`Welcome, ${user?.firstName ? `${user.firstName} ${user.lastName}` : 'Patient'}`}
+            description="Your personal MedCore Health Portal. Manage appointments, review doctor prescriptions, view diagnostic lab reports, and settle hospital invoices."
+            badge={<Badge variant="info">Patient Portal</Badge>}
+            actions={
+              <Button
+                variant="primary"
+                size="sm"
+                leftIcon={<Calendar className="w-4 h-4" />}
+                onClick={() => router.push('/dashboard/appointments/new')}
+              >
+                Book Consultation
+              </Button>
+            }
+          />
+
+          {/* Patient Quick Status Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <StatCard
+              title="Next Appointment"
+              value="Tomorrow, 10:00 AM"
+              subtitle="Dr. Sarah Jenkins (Cardiology)"
+              icon={<Calendar className="w-5 h-5" />}
+              onClick={() => router.push('/dashboard/appointments')}
+            />
+            <StatCard
+              title="Active Prescriptions"
+              value="1 Active Rx"
+              subtitle="Atorvastatin 20mg · 30 Days"
+              icon={<Pill className="w-5 h-5" />}
+              onClick={() => router.push('/dashboard/prescriptions')}
+            />
+            <StatCard
+              title="Diagnostic Lab Reports"
+              value="2 Verified"
+              subtitle="Lipid Panel & CBC Ready"
+              icon={<FlaskConical className="w-5 h-5" />}
+              onClick={() => router.push('/dashboard/laboratory')}
+            />
+            <StatCard
+              title="Outstanding Balance"
+              value="$120.00"
+              subtitle="1 invoice pending payment"
+              icon={<Receipt className="w-5 h-5" />}
+              onClick={() => router.push('/dashboard/billing')}
+            />
+          </div>
+
+          {/* Patient Workflow Cards */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Upcoming Appointments */}
+            <Card>
+              <CardHeader className="flex items-center justify-between border-b pb-4">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Calendar className="w-4 h-4 text-teal-600" />
+                    My Scheduled Appointments
+                  </CardTitle>
+                  <CardDescription>Upcoming outpatient visits and consultation slots</CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
+                  onClick={() => router.push('/dashboard/appointments')}
+                >
+                  View All
+                </Button>
+              </CardHeader>
+              <CardContent className="p-4 space-y-3">
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 flex items-center justify-between">
+                  <div>
+                    <div className="font-semibold text-slate-900 dark:text-white">Dr. Sarah Jenkins</div>
+                    <div className="text-xs text-slate-500">Cardiology · OPD Room 204</div>
+                    <div className="text-xs font-medium text-teal-600 mt-1">Tomorrow · 10:00 AM - 10:15 AM</div>
+                  </div>
+                  <Badge variant="info">CONFIRMED</Badge>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Active Prescriptions */}
+            <Card>
+              <CardHeader className="flex items-center justify-between border-b pb-4">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Pill className="w-4 h-4 text-indigo-600" />
+                    My Digital Prescriptions
+                  </CardTitle>
+                  <CardDescription>Official doctor prescriptions with secure dosage instructions</CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
+                  onClick={() => router.push('/dashboard/prescriptions')}
+                >
+                  View All
+                </Button>
+              </CardHeader>
+              <CardContent className="p-4 space-y-3">
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 flex items-center justify-between">
+                  <div>
+                    <div className="font-semibold text-slate-900 dark:text-white font-mono text-sm">RX-2026-000001</div>
+                    <div className="text-xs text-slate-500">Dr. Sarah Jenkins · Atorvastatin 20mg (1-0-0)</div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">Dispensed & Verified by Central Pharmacy</div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    leftIcon={<Download className="w-3.5 h-3.5" />}
+                    onClick={() => router.push('/dashboard/prescriptions')}
+                  >
+                    View Rx PDF
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Diagnostic Lab Reports */}
+            <Card>
+              <CardHeader className="flex items-center justify-between border-b pb-4">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <FlaskConical className="w-4 h-4 text-purple-600" />
+                    Verified Diagnostic Laboratory Reports
+                  </CardTitle>
+                  <CardDescription>Signed clinical lab findings with normal reference ranges</CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
+                  onClick={() => router.push('/dashboard/laboratory')}
+                >
+                  View All
+                </Button>
+              </CardHeader>
+              <CardContent className="p-4 space-y-3">
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 flex items-center justify-between">
+                  <div>
+                    <div className="font-semibold text-slate-900 dark:text-white">Comprehensive Lipid Profile</div>
+                    <div className="text-xs text-slate-500">Ordered by Dr. Sarah Jenkins · Specimen: Venous Blood</div>
+                    <div className="text-xs text-emerald-600 font-medium mt-1">Verified by Pathologist · Ready</div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => router.push('/dashboard/laboratory')}
+                  >
+                    View Report
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Invoices & Payments */}
+            <Card>
+              <CardHeader className="flex items-center justify-between border-b pb-4">
+                <div>
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Receipt className="w-4 h-4 text-amber-600" />
+                    Hospital Invoices & Receipts
+                  </CardTitle>
+                  <CardDescription>Itemized billing statements, copay, and payment history</CardDescription>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
+                  onClick={() => router.push('/dashboard/billing')}
+                >
+                  View All
+                </Button>
+              </CardHeader>
+              <CardContent className="p-4 space-y-3">
+                <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900/50 flex items-center justify-between">
+                  <div>
+                    <div className="font-semibold text-slate-900 dark:text-white font-mono text-sm">INV-2026-000101</div>
+                    <div className="text-xs text-slate-500">OPD Consultation · Total: $120.00 · Balance Due: $120.00</div>
+                    <div className="text-[11px] text-amber-600 font-medium mt-0.5">Payment Pending</div>
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={() => router.push('/dashboard/billing')}
+                  >
+                    Pay Online
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
         </div>
-      </div>
+      </AppShell>
     );
   }
 
-  const role = user?.role || UserRole.DOCTOR;
-
-  const getRoleBadgeStyle = (r: UserRole) => {
-    switch (r) {
-      case UserRole.SUPER_ADMIN:
-        return 'bg-purple-100 text-purple-800 border-purple-300 dark:bg-purple-950 dark:text-purple-300';
-      case UserRole.HOSPITAL_ADMIN:
-        return 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-950 dark:text-blue-300';
-      case UserRole.DOCTOR:
-        return 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950 dark:text-emerald-300';
-      case UserRole.NURSE:
-        return 'bg-teal-100 text-teal-800 border-teal-300 dark:bg-teal-950 dark:text-teal-300';
-      case UserRole.RECEPTIONIST:
-        return 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300';
-      case UserRole.LAB_TECHNICIAN:
-        return 'bg-cyan-100 text-cyan-800 border-cyan-300 dark:bg-cyan-950 dark:text-cyan-300';
-      case UserRole.PHARMACIST:
-        return 'bg-indigo-100 text-indigo-800 border-indigo-300 dark:bg-indigo-950 dark:text-indigo-300';
-      case UserRole.ACCOUNTANT:
-        return 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-950 dark:text-orange-300';
-      case UserRole.PATIENT:
-        return 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950 dark:text-rose-300';
-      default:
-        return 'bg-slate-100 text-slate-800 border-slate-300 dark:bg-slate-800 dark:text-slate-300';
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
-      {/* Navigation Header */}
-      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-lg bg-teal-600 flex items-center justify-center text-white shadow-md shadow-teal-600/20">
-              <Activity className="w-6 h-6" />
-            </div>
-            <div>
-              <div className="font-bold text-slate-900 dark:text-white leading-tight flex items-center gap-2">
-                MedCore <span className="text-teal-600 dark:text-teal-400">HMS</span>
-                <span className="text-xs px-2 py-0.5 rounded font-mono bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
-                  Supabase Auth Active
-                </span>
-              </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                <Building2 className="w-3 h-3" />
-                {user?.hospitalName || 'Metro General Hospital'}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-4">
-            <div className="text-right hidden sm:block">
-              <div className="text-sm font-semibold text-slate-900 dark:text-white">
-                {user?.firstName} {user?.lastName}
-              </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">{user?.email}</div>
-            </div>
-            <span
-              className={`text-xs px-2.5 py-1 rounded-full font-medium border ${getRoleBadgeStyle(
-                role,
-              )}`}
+    <AppShell>
+      {/* Header with Greetings and Quick Actions */}
+      <PageHeader
+        title={`Hospital Dashboard`}
+        description={`${user?.hospitalName || 'Metro General Hospital'} &middot; Operational Overview &middot; ${todayFormatted}`}
+        badge={
+          <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-teal-50 dark:bg-teal-950 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800">
+            Live Clinical Ops
+          </span>
+        }
+        actions={
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              leftIcon={<UserPlus className="w-4 h-4 text-teal-600" />}
+              onClick={() => router.push('/dashboard/patients/new')}
             >
-              {role.replace('_', ' ')}
-            </span>
-            <button
-              onClick={handleSignOut}
-              className="p-2 rounded-lg border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors"
-              title="Sign Out"
+              Register Patient
+            </Button>
+            <Button
+              variant="primary"
+              size="sm"
+              leftIcon={<Calendar className="w-4 h-4" />}
+              onClick={() => router.push('/dashboard/appointments/new')}
             >
-              <LogOut className="w-4 h-4" />
-            </button>
+              Book Appointment
+            </Button>
           </div>
-        </div>
-      </header>
+        }
+      />
 
-      {/* Main Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-6">
-        {/* Welcome & Security Banner */}
-        <div className="p-6 rounded-2xl bg-gradient-to-r from-teal-900 via-teal-800 to-slate-900 text-white shadow-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-          <div>
-            <div className="flex items-center gap-2 text-teal-300 text-xs font-semibold uppercase tracking-wider mb-1">
-              <ShieldCheck className="w-4 h-4" />
-              Authenticated Clinical Session
-            </div>
-            <h1 className="text-2xl font-bold">
-              Welcome back, {user?.firstName} {user?.lastName}
-            </h1>
-            <p className="text-teal-100/80 text-xs sm:text-sm mt-1">
-              Role permissions verified via Supabase Identity &middot; Tenant: {user?.hospitalName || 'Metro General Hospital'}
-            </p>
-          </div>
-          <div className="bg-teal-950/70 border border-teal-700/50 p-3 rounded-xl text-xs font-mono space-y-1">
-            <div className="text-teal-400">SESSION: Active</div>
-            <div className="text-slate-300 truncate max-w-[260px]">UID: {user?.id}</div>
-            <div className="text-slate-400">DB: PostgreSQL 16 (Mumbai)</div>
-          </div>
-        </div>
+      {/* Operational KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          title="Today's Appointments"
+          value={appointments.length || 4}
+          subtitle="4 scheduled in morning OPD"
+          icon={<Calendar className="w-5 h-5" />}
+          trend={{ label: '2 checked in', positive: true }}
+          onClick={() => router.push('/dashboard/appointments')}
+        />
+        <StatCard
+          title="Active Encounters"
+          value="1 In Consultation"
+          subtitle="Dr. Sharma &middot; Room 204"
+          icon={<Stethoscope className="w-5 h-5" />}
+          trend={{ label: 'Live EMR', positive: true }}
+          onClick={() => router.push('/dashboard/clinical')}
+        />
+        <StatCard
+          title="Pharmacy Dispensing"
+          value="2 Pending"
+          subtitle="FIFO/FEFO batch allocation"
+          icon={<Pill className="w-5 h-5" />}
+          trend={{ label: 'Stock Synced', positive: true }}
+          onClick={() => router.push('/dashboard/pharmacy')}
+        />
+        <StatCard
+          title="Diagnostic Lab Tests"
+          value="3 Orders"
+          subtitle="1 report ready for approval"
+          icon={<FlaskConical className="w-5 h-5" />}
+          trend={{ label: 'Urgent Lipid', positive: false }}
+          onClick={() => router.push('/dashboard/laboratory')}
+        />
+      </div>
 
-        {/* Dynamic Metric Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className="p-5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-              <span className="text-xs uppercase tracking-wider font-semibold">Today's Appointments</span>
-              <Calendar className="w-4 h-4 text-teal-600" />
-            </div>
-            <div className="text-2xl font-bold mt-2">18 Patients</div>
-            <div className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">↑ 4 waiting in OPD queue</div>
-          </div>
-
-          <div className="p-5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-              <span className="text-xs uppercase tracking-wider font-semibold">Active Inpatients</span>
-              <HeartPulse className="w-4 h-4 text-blue-600" />
-            </div>
-            <div className="text-2xl font-bold mt-2">42 Beds</div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1">Occupancy rate: 84%</div>
-          </div>
-
-          <div className="p-5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-              <span className="text-xs uppercase tracking-wider font-semibold">Lab Orders</span>
-              <TestTube2 className="w-4 h-4 text-purple-600" />
-            </div>
-            <div className="text-2xl font-bold mt-2">7 Pending</div>
-            <div className="text-xs text-purple-600 dark:text-purple-400 mt-1">Lipid & CBC reports ready</div>
-          </div>
-
-          <div className="p-5 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm">
-            <div className="flex items-center justify-between text-slate-500 dark:text-slate-400">
-              <span className="text-xs uppercase tracking-wider font-semibold">Prescriptions</span>
-              <Pill className="w-4 h-4 text-emerald-600" />
-            </div>
-            <div className="text-2xl font-bold mt-2">12 Dispensed</div>
-            <div className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">Pharmacy inventory synced</div>
-          </div>
-        </div>
-
-        {/* Operational Modules */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold flex items-center gap-2">
-                <Stethoscope className="w-5 h-5 text-teal-600" />
-                Active Clinical Encounter Queue
-              </h2>
-              <span className="text-xs px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 font-mono">
-                Live Doctor View
-              </span>
-            </div>
-
-            <div className="divide-y divide-slate-100 dark:divide-slate-800 text-sm">
-              <div className="py-3 flex items-center justify-between">
-                <div>
-                  <div className="font-semibold text-slate-900 dark:text-white">
-                    Arjun Verma (38M) &middot; UHID: MGH-2025-000001
-                  </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                    Chief Complaint: Chest discomfort, BP: 142/88 mmHg, BMI: 25.1
-                  </div>
-                </div>
-                <span className="text-xs font-semibold px-2.5 py-1 rounded bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
-                  In Consultation
-                </span>
+      {/* Main Workload & Real Queues */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* Left Column (2 Cols): OPD Queue & Timeline */}
+        <div className="lg:col-span-2 space-y-6">
+          <Card>
+            <CardHeader className="flex items-center justify-between">
+              <div>
+                <CardTitle className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-teal-600" />
+                  Today's Outpatient (OPD) Consultation Queue
+                </CardTitle>
+                <CardDescription>
+                  Live patient appointments scheduled for consultation today
+                </CardDescription>
               </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                rightIcon={<ArrowRight className="w-3.5 h-3.5" />}
+                onClick={() => router.push('/dashboard/appointments')}
+              >
+                View Full Calendar
+              </Button>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="divide-y divide-slate-100 dark:divide-slate-800">
+                {appointments.slice(0, 4).map((apt) => (
+                  <div
+                    key={apt.id}
+                    className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition"
+                  >
+                    <div className="flex items-start gap-3">
+                      <div className="p-2.5 rounded-xl bg-teal-50 dark:bg-teal-950/60 text-teal-700 dark:text-teal-300 font-mono text-xs font-bold text-center shrink-0">
+                        {apt.startTime}
+                      </div>
+                      <div>
+                        <div className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                          <span>
+                            {apt.patient?.firstName} {apt.patient?.lastName}
+                          </span>
+                          <span className="text-xs font-mono font-normal text-slate-500">
+                            ({apt.patient?.uhid})
+                          </span>
+                        </div>
+                        <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                          Doctor: {apt.doctor?.user.firstName} {apt.doctor?.user.lastName} ({apt.doctor?.specialization})
+                        </div>
+                        {apt.reason && (
+                          <div className="text-xs text-slate-600 dark:text-slate-300 mt-1 italic">
+                            "{apt.reason}"
+                          </div>
+                        )}
+                      </div>
+                    </div>
 
-              <div className="py-3 flex items-center justify-between">
-                <div>
-                  <div className="font-semibold text-slate-900 dark:text-white">
-                    Kavita Patel (45F) &middot; UHID: MGH-2025-000002
+                    <div className="flex items-center gap-2 self-end sm:self-center">
+                      <Badge
+                        variant={
+                          apt.status === 'IN_PROGRESS'
+                            ? 'warning'
+                            : apt.status === 'CONFIRMED'
+                            ? 'success'
+                            : 'neutral'
+                        }
+                        dot
+                      >
+                        {apt.status.replace('_', ' ')}
+                      </Badge>
+                      {apt.status === 'IN_PROGRESS' ? (
+                        <Button
+                          variant="clinical"
+                          size="sm"
+                          onClick={() => router.push('/dashboard/clinical')}
+                        >
+                          Resume Encounter
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => router.push(`/dashboard/appointments/detail?id=${apt.id}`)}
+                        >
+                          Details
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                  <div className="text-xs text-slate-500 dark:text-slate-400">
-                    Follow-up: Type 2 Diabetes Mellitus, HbA1c: 7.2%
-                  </div>
-                </div>
-                <span className="text-xs font-semibold px-2.5 py-1 rounded bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300">
-                  Vitals Recorded
-                </span>
+                ))}
               </div>
-            </div>
-          </div>
+            </CardContent>
+          </Card>
 
-          <div className="p-6 rounded-2xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 shadow-sm space-y-4">
-            <h2 className="text-base font-semibold flex items-center gap-2">
-              <ClipboardList className="w-5 h-5 text-teal-600" />
-              Quick Actions
-            </h2>
-            <div className="grid grid-cols-1 gap-2.5">
+          {/* Clinical Activity & Alerts */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <Pill className="w-4 h-4 text-indigo-600" />
+                  Pharmacy Dispensing Queue
+                </CardTitle>
+                <CardDescription>Prescriptions pending batch allocation</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 pt-0">
+                <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 text-xs space-y-1">
+                  <div className="flex items-center justify-between font-semibold">
+                    <span>RX-2026-000001 (Arjun Verma)</span>
+                    <Badge variant="warning">Awaiting Dispense</Badge>
+                  </div>
+                  <div className="text-slate-500">Atorvastatin 20mg, Metoprolol ER 50mg</div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => router.push('/dashboard/pharmacy')}
+                >
+                  Open Dispensing Workspace
+                </Button>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <FlaskConical className="w-4 h-4 text-purple-600" />
+                  Pathology Diagnostic Alerts
+                </CardTitle>
+                <CardDescription>Laboratory investigations awaiting review</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3 pt-0">
+                <div className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/50 text-xs space-y-1">
+                  <div className="flex items-center justify-between font-semibold">
+                    <span>LAB-2026-000101 (Arjun Verma)</span>
+                    <Badge variant="danger">High Cholesterol</Badge>
+                  </div>
+                  <div className="text-slate-500">Total Cholesterol: 242 mg/dL (Urgent)</div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full"
+                  onClick={() => router.push('/dashboard/laboratory')}
+                >
+                  Review Lab Results
+                </Button>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Right Column (1 Col): Quick Action Launcher & Hospital Status */}
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base flex items-center gap-2">
+                <Activity className="w-4 h-4 text-teal-600" />
+                Primary Hospital Workflows
+              </CardTitle>
+              <CardDescription>Direct navigation to operational workstations</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2 pt-0">
               <button
                 onClick={() => router.push('/dashboard/clinical')}
-                className="w-full text-left p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors flex items-center gap-3 text-xs sm:text-sm font-medium"
+                className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-teal-500 dark:hover:border-teal-500 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition flex items-center gap-3 text-left group"
               >
-                <FileText className="w-4 h-4 text-teal-600" />
-                <span>Start New Clinical Encounter</span>
+                <div className="p-2 rounded-lg bg-teal-50 dark:bg-teal-950 text-teal-600 dark:text-teal-400 group-hover:bg-teal-600 group-hover:text-white transition">
+                  <Stethoscope className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-white">
+                    Start Clinical Encounter
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Vitals, ICD-10 Diagnoses, Notes & Rx
+                  </div>
+                </div>
               </button>
-              <button className="w-full text-left p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors flex items-center gap-3 text-xs sm:text-sm font-medium">
-                <Users className="w-4 h-4 text-blue-600" />
-                <span>Register New Patient (UHID)</span>
-              </button>
-              <button className="w-full text-left p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors flex items-center gap-3 text-xs sm:text-sm font-medium">
-                <TestTube2 className="w-4 h-4 text-purple-600" />
-                <span>Order Diagnostic Lab Tests</span>
-              </button>
-              <button className="w-full text-left p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition-colors flex items-center gap-3 text-xs sm:text-sm font-medium">
-                <CreditCard className="w-4 h-4 text-emerald-600" />
-                <span>Generate OPD Consultation Invoice</span>
-              </button>
-            </div>
-          </div>
-        </div>
 
-        {/* Patient Prescriptions & Clinical Orders History (Phase 6) */}
-        <PatientPrescriptionHistory />
-      </main>
-    </div>
+              <button
+                onClick={() => router.push('/dashboard/patients/new')}
+                className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-blue-500 dark:hover:border-blue-500 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition flex items-center gap-3 text-left group"
+              >
+                <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 group-hover:bg-blue-600 group-hover:text-white transition">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-white">
+                    Register New Patient
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Auto-generate UHID & Demographics
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => router.push('/dashboard/appointments/new')}
+                className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-teal-500 dark:hover:border-teal-500 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition flex items-center gap-3 text-left group"
+              >
+                <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950 text-emerald-600 dark:text-emerald-400 group-hover:bg-emerald-600 group-hover:text-white transition">
+                  <Calendar className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-white">
+                    Schedule Appointment
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Doctor slot availability & booking
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => router.push('/dashboard/pharmacy')}
+                className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-indigo-500 dark:hover:border-indigo-500 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition flex items-center gap-3 text-left group"
+              >
+                <div className="p-2 rounded-lg bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white transition">
+                  <Pill className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-white">
+                    Pharmacy Batch Dispense
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Prescriptions & FEFO Stock Allocation
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => router.push('/dashboard/billing')}
+                className="w-full p-3 rounded-xl border border-slate-200 dark:border-slate-800 hover:border-amber-500 dark:hover:border-amber-500 hover:bg-slate-50 dark:hover:bg-slate-800/60 transition flex items-center gap-3 text-left group"
+              >
+                <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400 group-hover:bg-amber-600 group-hover:text-white transition">
+                  <Receipt className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="text-xs sm:text-sm font-semibold text-slate-900 dark:text-white">
+                    Billing & Cashier Register
+                  </div>
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Itemized Consultation Invoices & Receipts
+                  </div>
+                </div>
+              </button>
+            </CardContent>
+          </Card>
+
+          {/* Hospital Occupancy & Bed Census */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Building2 className="w-4 h-4 text-teal-600" />
+                Inpatient (IPD) Bed Census
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 pt-0">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">Total Operational Beds</span>
+                <span className="font-semibold font-mono">50</span>
+              </div>
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-500">Occupied (Admitted)</span>
+                <span className="font-semibold text-teal-600 font-mono">42 (84%)</span>
+              </div>
+              <div className="w-full h-2 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                <div className="h-full bg-teal-600 rounded-full w-[84%]" />
+              </div>
+              <div className="flex items-center justify-between text-[11px] text-slate-400 pt-1">
+                <span>General Ward: 28/32</span>
+                <span>ICU / CCU: 8/10</span>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </AppShell>
   );
 }

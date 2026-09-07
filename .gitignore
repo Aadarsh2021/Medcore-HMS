@@ -48,3 +48,4 @@ uploads/
 tmp/
 scratch/
 node_modules
+*.tsbuildinfo

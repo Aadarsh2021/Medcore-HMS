@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuthStore } from '../../../stores/authStore';
+import { AppShell } from '../../../components/layout/AppShell';
+import { PageHeader } from '../../../components/layout/PageHeader';
 import {
   Activity,
   AlertTriangle,
@@ -270,41 +272,27 @@ export default function DoctorClinicalWorkspacePage() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 pb-16">
-      {/* Header Bar */}
-      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => router.push('/dashboard')}
-              className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-300 transition-colors"
-              title="Return to Dashboard"
-            >
-              <ArrowLeft className="w-4 h-4" />
-            </button>
-            <div className="w-9 h-9 rounded-lg bg-teal-600 flex items-center justify-center text-white shadow-md shadow-teal-600/20">
-              <Stethoscope className="w-5 h-5" />
-            </div>
-            <div>
-              <div className="font-bold text-slate-900 dark:text-white leading-tight flex items-center gap-2 text-sm sm:text-base">
-                Doctor Clinical Workspace
-                {isCompleted ? (
-                  <span className="text-xs px-2 py-0.5 rounded font-medium bg-purple-100 text-purple-800 dark:bg-purple-950/80 dark:text-purple-300 border border-purple-300 dark:border-purple-800 flex items-center gap-1">
-                    <Lock className="w-3 h-3" /> Finalized & Immutable
-                  </span>
-                ) : (
-                  <span className="text-xs px-2 py-0.5 rounded font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1">
-                    <Clock className="w-3 h-3" /> Encounter In Progress
-                  </span>
-                )}
-              </div>
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                Phase 5 EMR &middot; Tenant: {user?.hospitalName || 'Metro General Hospital'}
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
+    <AppShell>
+      <PageHeader
+        breadcrumbs={[
+          { label: 'Clinical Workspace', href: '/dashboard/clinical' },
+          { label: `Encounter: ${patient.fullName}` },
+        ]}
+        title="Doctor Clinical Workspace"
+        description={`Active consultation with ${patient.fullName} (${patient.uhid}) · ${user?.hospitalName || 'Metro General Hospital'}`}
+        badge={
+          isCompleted ? (
+            <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 border border-purple-300 dark:border-purple-800 flex items-center gap-1">
+              <Lock className="w-3 h-3" /> Finalized & Immutable
+            </span>
+          ) : (
+            <span className="text-xs px-2.5 py-0.5 rounded-full font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800 flex items-center gap-1">
+              <Clock className="w-3 h-3" /> In Progress
+            </span>
+          )
+        }
+        actions={
+          <div className="flex items-center gap-2">
             {isCompleted ? (
               <button
                 onClick={() => setIsAmendmentModalOpen(true)}
@@ -335,11 +323,10 @@ export default function DoctorClinicalWorkspacePage() {
               </>
             )}
           </div>
-        </div>
-      </header>
+        }
+      />
 
-      {/* Main Workspace Container */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
+      <div className="space-y-6">
         {errorMessage && (
           <div className="p-4 rounded-xl bg-rose-50 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-sm flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -818,7 +805,7 @@ export default function DoctorClinicalWorkspacePage() {
             )}
           </div>
         </div>
-      </main>
+      </div>
 
       {/* Additive Amendment Modal */}
       {isAmendmentModalOpen && (
@@ -897,6 +884,6 @@ export default function DoctorClinicalWorkspacePage() {
           </div>
         </div>
       )}
-    </div>
+    </AppShell>
   );
 }
