@@ -16,17 +16,17 @@ jobs:
 
       - name: 2. Ping Supabase REST API Gateway
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL || 'https://ihpjezapyznhzbhxfrvu.supabase.co' }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY || 'sb_publishable_4PWubQVpA5UHZMVJfmHHgA_HP0qBw9S' }}
+          SUPABASE_URL: "https://ihpjezapyznhzbhxfrvu.supabase.co"
+          SUPABASE_KEY: "sb_publishable_4PWubQVpA5UHZMVJfmHHgA_HP0qBw9S"
         run: |
-          echo "Sending HTTP heartbeat to Supabase REST API..."
+          echo "Sending HTTP heartbeat to Supabase Gateway..."
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
             -H "apikey: $SUPABASE_KEY" \
             -H "Authorization: Bearer $SUPABASE_KEY" \
-            "$SUPABASE_URL/rest/v1/Hospital?select=count")
-          echo "Supabase HTTP Response Code: $STATUS"
+            "$SUPABASE_URL/auth/v1/health")
+          echo "Supabase Auth Health Response Code: $STATUS"
           if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
-            echo "HTTP Heartbeat successfully registered with Supabase!"
+            echo "HTTP Heartbeat successfully registered with Supabase project!"
           fi
 
       - name: 3. Setup Node.js 22
