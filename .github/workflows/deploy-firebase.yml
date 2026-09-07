@@ -14,6 +14,9 @@ jobs:
   build-and-deploy:
     name: Build and Deploy to Firebase
     runs-on: ubuntu-latest
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MEDCORE_HMS_EEA8E }}
+      FIREBASE_TOKEN: ${{ secrets.FIREBASE_TOKEN }}
 
     steps:
       - name: Checkout Source Code
@@ -34,7 +37,7 @@ jobs:
         run: pnpm install --no-frozen-lockfile
 
       - name: Generate Prisma Client
-        run: pnpm --filter @medcore/api exec prisma generate --schema=prisma/schema.prisma
+        run: pnpm exec prisma generate --schema=prisma/schema.prisma
 
       - name: Build Monorepo
         run: |
@@ -47,7 +50,7 @@ jobs:
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: "medcore-hms-eea8e"
 
       - name: Deploy to Firebase Hosting (via Service Account)
-        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MEDCORE_HMS_EEA8E != '' }}
+        if: env.FIREBASE_SERVICE_ACCOUNT != ''
         uses: FirebaseExtended/action-hosting-deploy@v0
         with:
           repoToken: '${{ secrets.GITHUB_TOKEN }}'
@@ -56,12 +59,12 @@ jobs:
           projectId: medcore-hms-eea8e
 
       - name: Deploy to Firebase Hosting (via FIREBASE_TOKEN)
-        if: ${{ secrets.FIREBASE_TOKEN != '' && secrets.FIREBASE_SERVICE_ACCOUNT_MEDCORE_HMS_EEA8E == '' }}
+        if: env.FIREBASE_TOKEN != '' && env.FIREBASE_SERVICE_ACCOUNT == ''
         run: |
-          npx -y firebase-tools deploy --only hosting --non-interactive --token "${{ secrets.FIREBASE_TOKEN }}" --project medcore-hms-eea8e
+          npx -y firebase-tools deploy --only hosting --non-interactive --token "$FIREBASE_TOKEN" --project medcore-hms-eea8e
 
       - name: Check Deployment Credentials
-        if: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_MEDCORE_HMS_EEA8E == '' && secrets.FIREBASE_TOKEN == '' }}
+        if: env.FIREBASE_SERVICE_ACCOUNT == '' && env.FIREBASE_TOKEN == ''
         run: |
           echo "ℹ️ Notice: GitHub Secrets does not have FIREBASE_TOKEN or FIREBASE_SERVICE_ACCOUNT_MEDCORE_HMS_EEA8E configured yet."
           echo "Build succeeded cleanly! To enable automated remote deployment on git push, add FIREBASE_TOKEN to GitHub repository secrets."

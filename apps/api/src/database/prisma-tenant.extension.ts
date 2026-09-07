@@ -14,6 +14,11 @@ export const DIRECT_TENANT_MODELS = [
   'MedicalRecord',
   'Prescription',
   'Medicine',
+  'MedicineBatch',
+  'StockReceipt',
+  'StockMovement',
+  'PrescriptionDispense',
+  'IdempotencyRecord',
   'LabCategory',
   'LabTest',
   'LabOrder',
@@ -84,10 +89,15 @@ export const INDIRECT_TENANT_MODELS: Record<
     parentIdField: 'prescriptionId',
     parentModel: 'Prescription',
   },
-  MedicineBatch: {
-    relation: 'medicine',
-    parentIdField: 'medicineId',
-    parentModel: 'Medicine',
+  StockReceiptItem: {
+    relation: 'receipt',
+    parentIdField: 'receiptId',
+    parentModel: 'StockReceipt',
+  },
+  PrescriptionDispenseItem: {
+    relation: 'dispense',
+    parentIdField: 'dispenseId',
+    parentModel: 'PrescriptionDispense',
   },
   LabOrderItem: {
     relation: 'order',
@@ -140,6 +150,25 @@ export const RELATION_TENANT_CONSTRAINTS: Record<
     { field: 'medicineId', parentModel: 'Medicine' },
   ],
   MedicineBatch: [{ field: 'medicineId', parentModel: 'Medicine' }],
+  StockReceipt: [{ field: 'receivedById', parentModel: 'User' }],
+  StockReceiptItem: [
+    { field: 'receiptId', parentModel: 'StockReceipt' },
+    { field: 'batchId', parentModel: 'MedicineBatch' },
+  ],
+  StockMovement: [
+    { field: 'batchId', parentModel: 'MedicineBatch' },
+    { field: 'medicineId', parentModel: 'Medicine' },
+    { field: 'performedById', parentModel: 'User' },
+  ],
+  PrescriptionDispense: [
+    { field: 'prescriptionId', parentModel: 'Prescription' },
+    { field: 'dispensedById', parentModel: 'User' },
+  ],
+  PrescriptionDispenseItem: [
+    { field: 'dispenseId', parentModel: 'PrescriptionDispense' },
+    { field: 'prescriptionItemId', parentModel: 'PrescriptionItem' },
+    { field: 'batchId', parentModel: 'MedicineBatch' },
+  ],
   LabOrder: [
     { field: 'patientId', parentModel: 'Patient' },
     { field: 'doctorId', parentModel: 'Doctor' },
@@ -293,12 +322,18 @@ export function createTenantExtension(rawClient: PrismaClient) {
           // --------------------------------------------------------------------------
           if (operation === 'findUnique' || operation === 'findUniqueOrThrow') {
             if (isDirect) {
+              let directWhere = { ...args?.where, hospitalId: effectiveTenantId };
+              for (const [k, v] of Object.entries(directWhere)) {
+                if (v && typeof v === 'object' && !Array.isArray(v) && !(v instanceof Date)) {
+                  if ('hospitalId' in (v as any)) {
+                    delete (directWhere as any)[k];
+                    directWhere = { ...directWhere, ...(v as any) };
+                  }
+                }
+              }
               const result = await (rawClient as any)[clientProp].findFirst({
                 ...args,
-                where: {
-                  ...args?.where,
-                  hospitalId: effectiveTenantId,
-                },
+                where: directWhere,
               });
               if (!result && operation === 'findUniqueOrThrow') {
                 throw new NotFoundException(

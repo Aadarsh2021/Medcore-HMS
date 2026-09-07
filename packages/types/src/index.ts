@@ -107,8 +107,19 @@ export enum PrescriptionFrequency {
 export enum PrescriptionStatus {
   DRAFT = 'DRAFT',
   ISSUED = 'ISSUED',
+  PARTIALLY_DISPENSED = 'PARTIALLY_DISPENSED',
   DISPENSED = 'DISPENSED',
   CANCELLED = 'CANCELLED',
+}
+
+export enum StockMovementType {
+  PURCHASE_RECEIPT = 'PURCHASE_RECEIPT',
+  DISPENSE = 'DISPENSE',
+  DISPENSE_RETURN = 'DISPENSE_RETURN',
+  ADJUSTMENT_INCREASE = 'ADJUSTMENT_INCREASE',
+  ADJUSTMENT_DECREASE = 'ADJUSTMENT_DECREASE',
+  DAMAGE_WRITEOFF = 'DAMAGE_WRITEOFF',
+  EXPIRY_DISPOSAL = 'EXPIRY_DISPOSAL',
 }
 
 export enum LabOrderStatus {
@@ -924,3 +935,88 @@ export interface PrescriptionResponseData {
   } | null;
   items: PrescriptionItemData[];
 }
+
+// ------------------------------------------------------------------------------
+// PHARMACY & INVENTORY (PHASE 7)
+// ------------------------------------------------------------------------------
+
+export interface BatchAllocationProposal {
+  batchId: string;
+  batchNumber: string;
+  expiryDate: string;
+  availableQuantity: number;
+  allocatedQuantity: number;
+  unitCost: number;
+  mrp: number;
+  reason: 'FEFO_PRIMARY' | 'FIFO_TIE_BREAKER';
+}
+
+export interface DispensePlanItemData {
+  prescriptionItemId: string;
+  medicineId: string;
+  medicineName: string;
+  prescribedQuantity: number;
+  alreadyDispensedQuantity: number;
+  remainingQuantity: number;
+  allocations: BatchAllocationProposal[];
+  isFullyFulfillable: boolean;
+}
+
+export interface DispensePlanResponse {
+  prescriptionId: string;
+  prescriptionNumber: string;
+  patientName: string;
+  patientUhid: string;
+  items: DispensePlanItemData[];
+}
+
+export interface PrescriptionDispenseResponse {
+  dispenseId: string;
+  dispenseNumber: string;
+  prescriptionId: string;
+  prescriptionNumber: string;
+  prescriptionStatus: PrescriptionStatus;
+  dispensedAt: string;
+  notes?: string | null;
+  items: Array<{
+    prescriptionItemId: string;
+    medicineName: string;
+    quantityDispensed: number;
+    dispensedBatches: Array<{
+      batchId: string;
+      batchNumber: string;
+      quantity: number;
+    }>;
+  }>;
+}
+
+export interface StockReceiptResponse {
+  receiptId: string;
+  receiptNumber: string;
+  supplierName: string;
+  invoiceNumber: string;
+  invoiceDate: string;
+  receivedDate: string;
+  totalCost: string;
+  itemsReceived: number;
+}
+
+export interface StockAdjustmentResponse {
+  batchId: string;
+  batchNumber: string;
+  previousQuantity: number;
+  newQuantity: number;
+  adjustmentType: StockMovementType;
+  quantityChange: number;
+  movementId: string;
+}
+
+export interface DispenseReturnResponse {
+  dispenseItemId: string;
+  batchId: string;
+  batchNumber: string;
+  quantityReturned: number;
+  newBatchQuantity: number;
+  movementId: string;
+}
+

@@ -10,6 +10,7 @@ import { EncountersModule } from './modules/encounters/encounters.module';
 import { MedicalRecordsModule } from './modules/medical-records/medical-records.module';
 import { MedicinesModule } from './modules/medicines/medicines.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
+import { PharmacyModule } from './modules/pharmacy/pharmacy.module';
 import { StorageModule } from './common/storage/storage.module';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 
@@ -29,6 +30,7 @@ import { TenantContextInterceptor } from './common/interceptors/tenant-context.i
     MedicalRecordsModule,
     MedicinesModule,
     PrescriptionsModule,
+    PharmacyModule,
   ],
   providers: [
     {

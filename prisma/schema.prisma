@@ -116,8 +116,19 @@ enum PrescriptionFrequency {
 enum PrescriptionStatus {
   DRAFT
   ISSUED
+  PARTIALLY_DISPENSED
   DISPENSED
   CANCELLED
+}
+
+enum StockMovementType {
+  PURCHASE_RECEIPT
+  DISPENSE
+  DISPENSE_RETURN
+  ADJUSTMENT_INCREASE
+  ADJUSTMENT_DECREASE
+  DAMAGE_WRITEOFF
+  EXPIRY_DISPOSAL
 }
 
 enum LabOrderStatus {
@@ -226,6 +237,11 @@ model Hospital {
   prescriptions    Prescription[]
   prescriptionCounters PrescriptionNumberCounter[]
   medicines        Medicine[]
+  medicineBatches  MedicineBatch[]
+  stockReceipts    StockReceipt[]
+  stockMovements   StockMovement[]
+  prescriptionDispenses PrescriptionDispense[]
+  idempotencyRecords IdempotencyRecord[]
   labCategories    LabCategory[]
   labTests         LabTest[]
   labOrders        LabOrder[]
@@ -258,6 +274,9 @@ model User {
   refreshSessions RefreshSession[]
   notifications   Notification[]
   auditLogs       AuditLog[]
+  receivedStockReceipts   StockReceipt[]
+  performedStockMovements StockMovement[]
+  dispensedPrescriptions  PrescriptionDispense[]
 
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
@@ -658,6 +677,7 @@ model Prescription {
   voidedById          String?
 
   items               PrescriptionItem[]
+  dispenses           PrescriptionDispense[]
 
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
@@ -683,6 +703,8 @@ model PrescriptionItem {
   instructions      String?
   quantity          Int?
   dispensedQuantity Int                   @default(0)
+
+  dispenseItems     PrescriptionDispenseItem[]
 
   createdAt         DateTime              @default(now())
 
@@ -726,23 +748,159 @@ model Medicine {
 }
 
 model MedicineBatch {
-  id                String   @id @default(uuid())
+  id                String                     @id @default(uuid())
+  hospitalId        String
+  hospital          Hospital                   @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
   medicineId        String
-  medicine          Medicine @relation(fields: [medicineId], references: [id], onDelete: Cascade)
+  medicine          Medicine                   @relation(fields: [medicineId], references: [id], onDelete: Cascade)
   batchNumber       String
   manufacturingDate DateTime
   expiryDate        DateTime
   initialQuantity   Int
   currentQuantity   Int
-  unitCost          Decimal  @db.Decimal(10, 2)
-  mrp               Decimal  @db.Decimal(10, 2)
-  isQuarantined     Boolean  @default(false)
+  unitCost          Decimal                    @db.Decimal(10, 2)
+  mrp               Decimal                    @db.Decimal(10, 2)
+  isQuarantined     Boolean                    @default(false)
+  quarantinedAt     DateTime?
+  quarantinedById   String?
+  quarantineReason  String?
 
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  movements         StockMovement[]
+  dispenseItems     PrescriptionDispenseItem[]
+  receiptItems      StockReceiptItem[]
 
-  @@unique([medicineId, batchNumber])
-  @@index([medicineId, expiryDate])
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+
+  @@unique([hospitalId, medicineId, batchNumber])
+  @@index([hospitalId, medicineId])
+  @@index([hospitalId, expiryDate])
+  @@index([hospitalId, isQuarantined])
+}
+
+model StockReceipt {
+  id            String             @id @default(uuid())
+  hospitalId    String
+  hospital      Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  receiptNumber String
+  supplierName  String
+  invoiceNumber String
+  invoiceDate   DateTime
+  receivedDate  DateTime           @default(now())
+  totalCost     Decimal            @db.Decimal(12, 2)
+  notes         String?
+  receivedById  String
+  receivedBy    User               @relation(fields: [receivedById], references: [id])
+  items         StockReceiptItem[]
+
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  @@unique([hospitalId, receiptNumber])
+  @@unique([hospitalId, supplierName, invoiceNumber])
+  @@index([hospitalId, receivedDate])
+}
+
+model StockReceiptItem {
+  id               String        @id @default(uuid())
+  receiptId        String
+  receipt          StockReceipt  @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  batchId          String
+  batch            MedicineBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  medicineId       String
+  batchNumber      String
+  quantityReceived Int
+  unitCost         Decimal       @db.Decimal(10, 2)
+  mrp              Decimal       @db.Decimal(10, 2)
+  expiryDate       DateTime
+
+  createdAt        DateTime      @default(now())
+
+  @@index([receiptId])
+  @@index([batchId])
+}
+
+model StockMovement {
+  id            String            @id @default(uuid())
+  hospitalId    String
+  hospital      Hospital          @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  batchId       String
+  batch         MedicineBatch     @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  medicineId    String
+  movementType  StockMovementType
+  quantity      Int               // Signed: positive for intake/return, negative for deduction
+  balanceBefore Int
+  balanceAfter  Int
+  referenceType String?           // e.g. "PRESCRIPTION", "STOCK_RECEIPT", "STOCK_ADJUSTMENT", "RETURN"
+  referenceId   String?
+  reason        String?
+  performedById String
+  performedBy   User              @relation(fields: [performedById], references: [id])
+
+  createdAt     DateTime          @default(now())
+
+  @@index([hospitalId, batchId])
+  @@index([hospitalId, medicineId])
+  @@index([hospitalId, movementType])
+  @@index([hospitalId, createdAt])
+}
+
+model PrescriptionDispense {
+  id             String                     @id @default(uuid())
+  hospitalId     String
+  hospital       Hospital                   @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  prescriptionId String
+  prescription   Prescription               @relation(fields: [prescriptionId], references: [id], onDelete: Cascade)
+  dispenseNumber String
+  dispensedById  String
+  dispensedBy    User                       @relation(fields: [dispensedById], references: [id])
+  dispensedAt    DateTime                   @default(now())
+  notes          String?
+  idempotencyKey String?
+
+  items          PrescriptionDispenseItem[]
+
+  createdAt      DateTime                   @default(now())
+
+  @@unique([hospitalId, dispenseNumber])
+  @@unique([hospitalId, idempotencyKey])
+  @@index([hospitalId, prescriptionId])
+}
+
+model PrescriptionDispenseItem {
+  id                 String               @id @default(uuid())
+  dispenseId         String
+  dispense           PrescriptionDispense @relation(fields: [dispenseId], references: [id], onDelete: Cascade)
+  prescriptionItemId String
+  prescriptionItem   PrescriptionItem     @relation(fields: [prescriptionItemId], references: [id], onDelete: Cascade)
+  batchId            String
+  batch              MedicineBatch        @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  quantityDispensed  Int
+  unitPrice          Decimal              @db.Decimal(10, 2)
+  returnedQuantity   Int                  @default(0)
+
+  createdAt          DateTime             @default(now())
+
+  @@index([dispenseId])
+  @@index([prescriptionItemId])
+  @@index([batchId])
+}
+
+model IdempotencyRecord {
+  id             String   @id @default(uuid())
+  hospitalId     String
+  hospital       Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  idempotencyKey String
+  endpoint       String
+  requestHash    String
+  responseStatus Int
+  responseBody   String   @db.Text
+
+  createdAt      DateTime @default(now())
+  expiresAt      DateTime
+
+  @@unique([hospitalId, idempotencyKey])
+  @@index([hospitalId, expiresAt])
 }
 
 // ------------------------------------------------------------------------------

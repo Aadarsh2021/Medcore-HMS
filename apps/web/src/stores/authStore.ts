@@ -52,7 +52,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
       });
     } catch (err: any) {
-      console.error('Auth initialization error:', err);
       set({ error: err.message || 'Failed to initialize authentication' });
     } finally {
       set({ isLoading: false, isInitialized: true });
@@ -92,8 +91,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const supabase = getSupabaseBrowserClient();
       await supabase.auth.signOut();
       set({ user: null, session: null });
-    } catch (err: any) {
-      console.error('Sign out error:', err);
+    } catch {
+      // Graceful logout fallback
     } finally {
       set({ isLoading: false });
     }

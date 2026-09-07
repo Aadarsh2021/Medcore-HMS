@@ -140,11 +140,11 @@ export function BillingHubContent({ defaultTab = 'invoices' }: { defaultTab?: st
         <div className="flex items-center gap-2">
           <Receipt className="w-4 h-4 text-amber-600 shrink-0" />
           <span>
-            <strong>Phase 8 Development Preview:</strong> Consolidated invoice itemization and cashier receipts active in adapter mode. Payment gateway integration will activate with Phase 8 release.
+            <strong>Payment Integration Pending:</strong> Consolidated invoice itemization and cashier receipts active in adapter mode. Real merchant gateway processing will activate upon Phase 8 backend release.
           </span>
         </div>
-        <span className="font-mono text-[11px] bg-amber-100 dark:bg-amber-900 px-2 py-0.5 rounded font-semibold">
-          Adapter Mode
+        <span className="font-mono text-[11px] bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 px-2.5 py-0.5 rounded font-bold uppercase tracking-wider">
+          Payment Integration Pending
         </span>
       </div>
 
@@ -478,7 +478,7 @@ export function BillingHubContent({ defaultTab = 'invoices' }: { defaultTab?: st
               <span className="font-mono text-slate-600 dark:text-slate-400">{lastReceipt.txn}</span>
             </div>
             <div className="p-3 bg-amber-50 dark:bg-amber-950/40 rounded-lg border border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200 text-[11px] leading-relaxed">
-              <strong>Notice:</strong> This is a development adapter demonstration receipt. No real monetary transaction has taken place. Full merchant settlement will activate upon Phase 8 deployment.
+              <strong>Payment Integration Pending:</strong> This is an offline cashier voucher generated in development adapter mode. No real merchant gateway funds have been captured.
             </div>
           </div>
         </Modal>
