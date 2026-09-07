@@ -10,5 +10,5 @@
     "skipLibCheck": true,
     "strict": false
   },
-  "exclude": ["node_modules", "dist", ".next"]
+  "exclude": ["node_modules", "dist", ".next", "apps"]
 }
