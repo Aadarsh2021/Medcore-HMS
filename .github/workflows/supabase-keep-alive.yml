@@ -11,7 +11,7 @@ jobs:
     name: Keep Supabase Project Active
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Ping Supabase API Gateway (curl)
+      - name: Ping Supabase API Gateway (curl)
         run: |
           echo "Sending HTTP heartbeat to Supabase Gateway..."
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -24,11 +24,3 @@ jobs:
             echo "❌ Supabase HTTP Heartbeat failed with status $STATUS"
             exit 1
           fi
-
-      - name: 2. Ping PostgreSQL Database Directly (psql)
-        env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-        run: |
-          echo "Executing lightweight SQL query on Supabase PostgreSQL..."
-          psql "$DATABASE_URL" -c "SELECT 1 as ping;"
-          echo "✅ PostgreSQL Heartbeat successfully registered!"
