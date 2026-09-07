@@ -7,9 +7,53 @@ import {
   ChevronLeft,
   ChevronRight,
   Filter,
+  Inbox,
 } from 'lucide-react';
-import { EmptyState } from './EmptyState';
-import { SkeletonTable } from './Skeleton';
+
+const TableEmptyState: React.FC<{
+  title: string;
+  description?: string;
+  action?: React.ReactNode;
+}> = ({ title, description, action }) => (
+  <div className="flex flex-col items-center justify-center p-8 text-center max-w-sm mx-auto">
+    <div className="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 flex items-center justify-center mb-3">
+      <Inbox className="w-6 h-6" />
+    </div>
+    <h3 className="text-sm font-semibold text-slate-800 dark:text-slate-200">
+      {title}
+    </h3>
+    {description && (
+      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 leading-relaxed">
+        {description}
+      </p>
+    )}
+    {action && <div className="mt-4">{action}</div>}
+  </div>
+);
+
+const TableSkeletonTable: React.FC<{ rows?: number; columns?: number }> = ({
+  rows = 5,
+  columns = 4,
+}) => (
+  <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3 shadow-sm">
+    <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+      <div className="h-8 w-48 animate-pulse bg-slate-200 dark:bg-slate-800 rounded-md" />
+      <div className="h-8 w-28 animate-pulse bg-slate-200 dark:bg-slate-800 rounded-md" />
+    </div>
+    <div className="space-y-2.5">
+      {Array.from({ length: rows }).map((_, rIdx) => (
+        <div key={rIdx} className="flex items-center gap-4 py-2">
+          {Array.from({ length: columns }).map((_, cIdx) => (
+            <div
+              key={cIdx}
+              className="h-4 flex-1 animate-pulse bg-slate-200 dark:bg-slate-800 rounded-md"
+            />
+          ))}
+        </div>
+      ))}
+    </div>
+  </div>
+);
 
 export interface Column<T> {
   header: string;
@@ -113,7 +157,7 @@ export function DataTable<T extends Record<string, any>>({
   };
 
   if (isLoading) {
-    return <SkeletonTable rows={pageSize} columns={columns.length} />;
+    return <TableSkeletonTable rows={pageSize} columns={columns.length} />;
   }
 
   return (
@@ -213,7 +257,7 @@ export function DataTable<T extends Record<string, any>>({
               ) : (
                 <tr>
                   <td colSpan={columns.length} className="py-12 text-center">
-                    <EmptyState
+                    <TableEmptyState
                       title={emptyTitle}
                       description={emptyDescription}
                       action={emptyAction}
@@ -260,7 +304,7 @@ export function DataTable<T extends Record<string, any>>({
             </div>
           ))
         ) : (
-          <EmptyState
+          <TableEmptyState
             title={emptyTitle}
             description={emptyDescription}
             action={emptyAction}
