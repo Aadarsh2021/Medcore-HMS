@@ -37,6 +37,34 @@ export class ApiError extends Error {
     super(message);
     this.name = 'ApiError';
   }
+
+  get isUnauthorized(): boolean {
+    return this.statusCode === 401;
+  }
+
+  get isForbidden(): boolean {
+    return this.statusCode === 403;
+  }
+
+  get isNotFound(): boolean {
+    return this.statusCode === 404;
+  }
+
+  get isConflict(): boolean {
+    return this.statusCode === 409;
+  }
+
+  get isValidationError(): boolean {
+    return this.statusCode === 422 || this.statusCode === 400;
+  }
+
+  get isRateLimited(): boolean {
+    return this.statusCode === 429;
+  }
+
+  get isNetworkError(): boolean {
+    return this.statusCode === 0;
+  }
 }
 
 export async function apiClient<T = any>(

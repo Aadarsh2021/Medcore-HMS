@@ -396,8 +396,8 @@ export function BillingHubContent({ defaultTab = 'invoices' }: { defaultTab?: st
         <Modal
           isOpen={isPaymentModalOpen}
           onClose={() => setIsPaymentModalOpen(false)}
-          title="Cashier Payment Settlement"
-          description={`Record settlement for Invoice ${selectedInvoice.invoiceNumber}`}
+          title="Cashier Payment Settlement (Preview)"
+          description={`Record preview settlement for Invoice ${selectedInvoice.invoiceNumber}`}
           footer={
             <>
               <Button variant="outline" size="sm" onClick={() => setIsPaymentModalOpen(false)}>
@@ -409,12 +409,16 @@ export function BillingHubContent({ defaultTab = 'invoices' }: { defaultTab?: st
                 isLoading={isProcessingPayment}
                 onClick={handleRecordPayment}
               >
-                Confirm Payment Receipt
+                Record Preview Settlement (Adapter)
               </Button>
             </>
           }
         >
           <div className="space-y-4">
+            <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/60 border border-amber-200 dark:border-amber-900 text-xs text-amber-900 dark:text-amber-200 leading-relaxed">
+              <strong>Payment Integration Pending:</strong> Real-time payment gateway webhooks and POS card terminals are pending Phase 8 backend release. This cashier desk demonstrates the settlement and receipt generation workflow in isolated adapter mode.
+            </div>
+
             <Input
               label="Settlement Amount (₹)"
               type="number"
@@ -441,6 +445,41 @@ export function BillingHubContent({ defaultTab = 'invoices' }: { defaultTab?: st
               value={paymentRef}
               onChange={(e) => setPaymentRef(e.target.value)}
             />
+          </div>
+        </Modal>
+      )}
+
+      {/* Receipt Modal */}
+      {lastReceipt && (
+        <Modal
+          isOpen={!!lastReceipt}
+          onClose={() => setLastReceipt(null)}
+          title="Hospital Payment Receipt (Preview)"
+          description="Issued by Cashier Desk · Adapter Simulation Mode"
+          footer={
+            <div className="flex items-center justify-between w-full">
+              <Button variant="outline" size="sm" onClick={() => window.print()}>
+                <Printer className="w-3.5 h-3.5 mr-1.5" />
+                Print Receipt
+              </Button>
+              <Button size="sm" onClick={() => setLastReceipt(null)}>
+                Close
+              </Button>
+            </div>
+          }
+        >
+          <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/60 space-y-3 text-xs">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+              <span className="font-semibold text-slate-700 dark:text-slate-300">Receipt Voucher:</span>
+              <span className="font-mono font-bold text-teal-600 dark:text-teal-400">{lastReceipt.rcp}</span>
+            </div>
+            <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+              <span className="font-semibold text-slate-700 dark:text-slate-300">Transaction ID:</span>
+              <span className="font-mono text-slate-600 dark:text-slate-400">{lastReceipt.txn}</span>
+            </div>
+            <div className="p-3 bg-amber-50 dark:bg-amber-950/40 rounded-lg border border-amber-200 dark:border-amber-900 text-amber-900 dark:text-amber-200 text-[11px] leading-relaxed">
+              <strong>Notice:</strong> This is a development adapter demonstration receipt. No real monetary transaction has taken place. Full merchant settlement will activate upon Phase 8 deployment.
+            </div>
           </div>
         </Modal>
       )}

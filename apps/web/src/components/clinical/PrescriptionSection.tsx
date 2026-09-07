@@ -256,7 +256,6 @@ export const PrescriptionSection: React.FC<PrescriptionSectionProps> = ({
   const handleDownloadPdf = async () => {
     setDownloadingPdf(true);
     try {
-      // Fetch 15-minute temporary signed URL
       const res = await fetch(`/api/prescriptions/${prescriptionId}/pdf/url`);
       if (res.ok) {
         const data = await res.json();
@@ -265,10 +264,9 @@ export const PrescriptionSection: React.FC<PrescriptionSectionProps> = ({
           return;
         }
       }
-      // Fallback demo notification
-      alert(`[Secure S3 Download]\nPre-signed 15-minute temporary S3 URL generated.\nPrescription: ${prescriptionNumber || 'RX-MGH-2026-000042'}\nIntegrity SHA-256: ${pdfSha256 || 'Verified'}`);
+      window.open(`/api/prescriptions/${prescriptionId}/pdf`, '_blank');
     } catch {
-      alert('Unable to load signed PDF. Please ensure S3 credentials are configured.');
+      setErrorMessage('Unable to load signed prescription document. Please retry.');
     } finally {
       setDownloadingPdf(false);
     }

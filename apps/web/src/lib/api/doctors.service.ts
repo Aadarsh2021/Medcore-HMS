@@ -51,6 +51,17 @@ export interface DoctorAvailabilityDay {
   isActive: boolean;
 }
 
+export interface DoctorSlotItem {
+  startTime: string;
+  endTime: string;
+  isBooked: boolean;
+}
+
+export interface DoctorSlotsResult {
+  slotDurationMinutes: number;
+  slots: DoctorSlotItem[];
+}
+
 const FALLBACK_DOCTORS: DoctorRecord[] = [
   {
     id: 'doc-001-sharma',
@@ -103,11 +114,11 @@ const FALLBACK_DOCTORS: DoctorRecord[] = [
       code: 'MED',
     },
     availability: [
-      { dayOfWeek: 1, startTime: '10:00', endTime: '16:00', slotDurationMinutes: 30, isActive: true },
-      { dayOfWeek: 2, startTime: '10:00', endTime: '16:00', slotDurationMinutes: 30, isActive: true },
-      { dayOfWeek: 3, startTime: '10:00', endTime: '16:00', slotDurationMinutes: 30, isActive: true },
-      { dayOfWeek: 4, startTime: '10:00', endTime: '16:00', slotDurationMinutes: 30, isActive: true },
-      { dayOfWeek: 5, startTime: '10:00', endTime: '16:00', slotDurationMinutes: 30, isActive: true },
+      { dayOfWeek: 1, startTime: '10:00', endTime: '15:00', slotDurationMinutes: 20, isActive: true },
+      { dayOfWeek: 2, startTime: '10:00', endTime: '15:00', slotDurationMinutes: 20, isActive: true },
+      { dayOfWeek: 3, startTime: '10:00', endTime: '15:00', slotDurationMinutes: 20, isActive: true },
+      { dayOfWeek: 4, startTime: '10:00', endTime: '15:00', slotDurationMinutes: 20, isActive: true },
+      { dayOfWeek: 5, startTime: '10:00', endTime: '15:00', slotDurationMinutes: 20, isActive: true },
     ],
   },
   {
@@ -132,9 +143,9 @@ const FALLBACK_DOCTORS: DoctorRecord[] = [
       code: 'ORTHO',
     },
     availability: [
-      { dayOfWeek: 1, startTime: '09:00', endTime: '14:00', slotDurationMinutes: 30, isActive: true },
-      { dayOfWeek: 3, startTime: '09:00', endTime: '14:00', slotDurationMinutes: 30, isActive: true },
-      { dayOfWeek: 5, startTime: '09:00', endTime: '14:00', slotDurationMinutes: 30, isActive: true },
+      { dayOfWeek: 1, startTime: '09:00', endTime: '13:30', slotDurationMinutes: 45, isActive: true },
+      { dayOfWeek: 3, startTime: '09:00', endTime: '13:30', slotDurationMinutes: 45, isActive: true },
+      { dayOfWeek: 5, startTime: '09:00', endTime: '13:30', slotDurationMinutes: 45, isActive: true },
     ],
   },
   {
@@ -159,9 +170,9 @@ const FALLBACK_DOCTORS: DoctorRecord[] = [
       code: 'PED',
     },
     availability: [
-      { dayOfWeek: 2, startTime: '11:00', endTime: '17:00', slotDurationMinutes: 30, isActive: true },
-      { dayOfWeek: 4, startTime: '11:00', endTime: '17:00', slotDurationMinutes: 30, isActive: true },
-      { dayOfWeek: 6, startTime: '09:00', endTime: '13:00', slotDurationMinutes: 30, isActive: true },
+      { dayOfWeek: 2, startTime: '11:00', endTime: '16:00', slotDurationMinutes: 15, isActive: true },
+      { dayOfWeek: 4, startTime: '11:00', endTime: '16:00', slotDurationMinutes: 15, isActive: true },
+      { dayOfWeek: 6, startTime: '09:00', endTime: '13:00', slotDurationMinutes: 15, isActive: true },
     ],
   },
 ];
@@ -232,25 +243,58 @@ export const doctorsService = {
     }
   },
 
-  async getSlots(doctorId: string, date: string): Promise<Array<{ startTime: string; endTime: string; isBooked: boolean }>> {
+  async getSlots(doctorId: string, date: string): Promise<DoctorSlotsResult> {
     try {
       const res = await apiClient<any>(`/doctors/${doctorId}/slots`, { params: { date } });
-      if (res.data?.slots) return res.data.slots;
+      if (res.data?.slots) {
+        return {
+          slotDurationMinutes: res.data.slotDurationMinutes || 30,
+          slots: res.data.slots,
+        };
+      }
     } catch {
       // Offline fallback
     }
 
-    // Generate standard 30-minute intervals
-    return [
-      { startTime: '09:00', endTime: '09:30', isBooked: false },
-      { startTime: '09:30', endTime: '10:00', isBooked: false },
-      { startTime: '10:00', endTime: '10:30', isBooked: false },
-      { startTime: '10:30', endTime: '11:00', isBooked: true },
-      { startTime: '11:00', endTime: '11:30', isBooked: false },
-      { startTime: '11:30', endTime: '12:00', isBooked: false },
-      { startTime: '14:00', endTime: '14:30', isBooked: false },
-      { startTime: '14:30', endTime: '15:00', isBooked: false },
-      { startTime: '15:00', endTime: '15:30', isBooked: false },
-    ];
+    // Dynamic schedule-derived fallback: compute slots from doctor's persisted DoctorAvailability
+    const doc = await this.findById(doctorId);
+    const dateObj = new Date(date + 'T00:00:00');
+    const dayOfWeek = dateObj.getDay();
+    const window = doc?.availability?.find(
+      (a) => a.dayOfWeek === dayOfWeek && a.isActive,
+    );
+
+    if (!window) {
+      return {
+        slotDurationMinutes: 30,
+        slots: [],
+      };
+    }
+
+    const duration = window.slotDurationMinutes || 30;
+    const [startH, startM] = window.startTime.split(':').map(Number);
+    const [endH, endM] = window.endTime.split(':').map(Number);
+    const startTotal = startH * 60 + startM;
+    const endTotal = endH * 60 + endM;
+
+    const generatedSlots: DoctorSlotItem[] = [];
+    for (let cur = startTotal; cur + duration <= endTotal; cur += duration) {
+      const slotStartH = Math.floor(cur / 60).toString().padStart(2, '0');
+      const slotStartM = (cur % 60).toString().padStart(2, '0');
+      const slotEndTotal = cur + duration;
+      const slotEndH = Math.floor(slotEndTotal / 60).toString().padStart(2, '0');
+      const slotEndM = (slotEndTotal % 60).toString().padStart(2, '0');
+
+      generatedSlots.push({
+        startTime: `${slotStartH}:${slotStartM}`,
+        endTime: `${slotEndH}:${slotEndM}`,
+        isBooked: false,
+      });
+    }
+
+    return {
+      slotDurationMinutes: duration,
+      slots: generatedSlots,
+    };
   },
 };

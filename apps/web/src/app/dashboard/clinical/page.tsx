@@ -32,6 +32,7 @@ import {
   AllergySeverity,
   AmendmentType,
   AmendmentSection,
+  UserRole,
 } from '@medcore/types';
 import { PrescriptionSection } from '../../../components/clinical/PrescriptionSection';
 
@@ -272,7 +273,7 @@ export default function DoctorClinicalWorkspacePage() {
   };
 
   return (
-    <AppShell>
+    <AppShell requiredRoles={[UserRole.SUPER_ADMIN, UserRole.DOCTOR, UserRole.NURSE]}>
       <PageHeader
         breadcrumbs={[
           { label: 'Clinical Workspace', href: '/dashboard/clinical' },

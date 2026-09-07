@@ -240,7 +240,7 @@ export default function AdministrationPage() {
   };
 
   return (
-    <AppShell>
+    <AppShell requiredRoles={[UserRole.SUPER_ADMIN, UserRole.HOSPITAL_ADMIN]}>
       <div className="space-y-6">
         <PageHeader
           title="Hospital Administration & RBAC"

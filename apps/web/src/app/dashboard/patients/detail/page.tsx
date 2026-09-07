@@ -9,6 +9,8 @@ import { Badge } from '../../../../components/ui/Badge';
 import { Button } from '../../../../components/ui/Button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '../../../../components/ui/Card';
 import { Skeleton } from '../../../../components/ui/Skeleton';
+import { useAuthStore } from '../../../../stores/authStore';
+import { UserRole } from '@medcore/types';
 import {
   User,
   Calendar,
@@ -25,6 +27,7 @@ import {
   Download,
   Clock,
   ArrowRight,
+  ShieldAlert,
 } from 'lucide-react';
 import { patientsService, PatientRecord } from '../../../../lib/api/patients.service';
 import { appointmentsService, AppointmentRecord } from '../../../../lib/api/appointments.service';
@@ -35,6 +38,7 @@ import { billingService, InvoiceRecord } from '../../../../lib/api/billing.servi
 function PatientDetailContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { user } = useAuthStore();
   const id = searchParams.get('id') || 'p-001-arjun-verma';
 
   const [patient, setPatient] = useState<PatientRecord | null>(null);
@@ -45,8 +49,16 @@ function PatientDetailContent() {
   const [activeTab, setActiveTab] = useState('overview');
   const [isLoading, setIsLoading] = useState(true);
 
+  // Enforce patient privacy: patients can only inspect their own record
+  const isPatientRole = user?.role === UserRole.PATIENT;
+  const isUnauthorizedPatient = Boolean(isPatientRole && patient && patient.userId && user?.id && patient.userId !== user.id);
+
   useEffect(() => {
     async function loadPatient360() {
+      if (!id) {
+        setIsLoading(false);
+        return;
+      }
       setIsLoading(true);
       try {
         const p = await patientsService.findById(id);
@@ -70,6 +82,23 @@ function PatientDetailContent() {
     loadPatient360();
   }, [id]);
 
+  if (isUnauthorizedPatient) {
+    return (
+      <div className="p-12 text-center max-w-md mx-auto space-y-3">
+        <div className="w-12 h-12 rounded-2xl bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900 flex items-center justify-center mx-auto">
+          <ShieldAlert className="w-6 h-6" />
+        </div>
+        <h2 className="text-base font-bold text-slate-900 dark:text-white">Patient Record Access Restricted</h2>
+        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+          Patients are restricted to viewing their personal health history only. Access to external medical records is prevented by backend tenant and patient access controls.
+        </p>
+        <Button variant="outline" size="sm" onClick={() => router.push('/dashboard')}>
+          Back to My Health Portal
+        </Button>
+      </div>
+    );
+  }
+
   if (isLoading) {
     return (
       <div className="space-y-6">
@@ -85,13 +114,15 @@ function PatientDetailContent() {
 
   if (!patient) {
     return (
-      <div className="p-12 text-center">
-        <h2 className="text-base font-bold text-slate-800">Patient Not Found</h2>
-        <p className="text-xs text-slate-500 mt-1">No patient record exists for ID: {id}</p>
+      <div className="p-12 text-center max-w-md mx-auto space-y-3">
+        <h2 className="text-base font-bold text-slate-800 dark:text-slate-200">Patient Record Not Found</h2>
+        <p className="text-xs text-slate-500 dark:text-slate-400">
+          The requested patient record could not be retrieved from the medical directory.
+        </p>
         <Button
           variant="outline"
           size="sm"
-          className="mt-4"
+          className="mt-2"
           onClick={() => router.push('/dashboard/patients')}
         >
           Return to Patients Directory

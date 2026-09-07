@@ -69,11 +69,10 @@ export const PatientPrescriptionHistory: React.FC<PatientPrescriptionHistoryProp
           return;
         }
       }
-      alert(
-        `[Patient Portal — Secure Signed Download]\nAccessing temporary 15-minute S3 URL for prescription ${rx.prescriptionNumber}.\nSigned by: ${rx.doctorName}`,
-      );
+      // Clean patient-facing fallback notification
+      window.open(`/api/prescriptions/${rx.id}/pdf`, '_blank');
     } catch {
-      alert('Unable to load prescription PDF. Please try again or contact hospital administration.');
+      alert('Unable to load prescription document. Please retry or contact the outpatient desk.');
     } finally {
       setDownloadingId(null);
     }

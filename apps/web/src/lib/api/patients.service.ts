@@ -13,6 +13,7 @@ import { Gender, BloodGroup } from '@medcore/types';
 
 export interface PatientRecord {
   id: string;
+  userId?: string;
   uhid: string;
   hospitalId: string;
   firstName: string;

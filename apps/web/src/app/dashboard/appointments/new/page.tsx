@@ -23,7 +23,10 @@ function BookAppointmentContent() {
   const [patients, setPatients] = useState<PatientRecord[]>([]);
   const [doctors, setDoctors] = useState<DoctorRecord[]>([]);
   const [slots, setSlots] = useState<Array<{ startTime: string; endTime: string; isBooked: boolean }>>([]);
+  const [slotDurationMinutes, setSlotDurationMinutes] = useState<number>(30);
+  const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [patientId, setPatientId] = useState(preselectedPatientId);
   const [doctorId, setDoctorId] = useState('');
@@ -54,11 +57,18 @@ function BookAppointmentContent() {
   useEffect(() => {
     async function fetchSlots() {
       if (doctorId && appointmentDate) {
-        const availableSlots = await doctorsService.getSlots(doctorId, appointmentDate);
-        setSlots(availableSlots);
-        const firstOpen = availableSlots.find((s) => !s.isBooked);
-        if (firstOpen) {
-          setSelectedSlot(firstOpen.startTime);
+        setIsLoadingSlots(true);
+        setErrorMessage(null);
+        try {
+          const res = await doctorsService.getSlots(doctorId, appointmentDate);
+          setSlots(res.slots);
+          setSlotDurationMinutes(res.slotDurationMinutes);
+          const firstOpen = res.slots.find((s) => !s.isBooked);
+          setSelectedSlot(firstOpen ? firstOpen.startTime : '');
+        } catch (err: any) {
+          setErrorMessage('Unable to load doctor consultation slots. Please retry.');
+        } finally {
+          setIsLoadingSlots(false);
         }
       }
     }
@@ -67,11 +77,12 @@ function BookAppointmentContent() {
 
   const handleBook = async () => {
     if (!patientId || !doctorId || !selectedSlot) {
-      alert('Please select a patient, doctor, and consultation time slot.');
+      setErrorMessage('Please select a patient, doctor, and consultation time slot.');
       return;
     }
 
     setIsSubmitting(true);
+    setErrorMessage(null);
     try {
       const apt = await appointmentsService.book({
         patientId,
@@ -83,7 +94,11 @@ function BookAppointmentContent() {
       });
       router.push(`/dashboard/appointments/detail?id=${apt.id}`);
     } catch (err: any) {
-      alert(err.message || 'Failed to book appointment.');
+      if (err.statusCode === 409) {
+        setErrorMessage('This consultation slot was just booked by another patient. Please choose another slot.');
+      } else {
+        setErrorMessage(err.message || 'Failed to book appointment. Please try another slot.');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -164,33 +179,65 @@ function BookAppointmentContent() {
             </div>
           )}
 
-          {/* Time Slot Picker */}
-          <div className="space-y-1.5 text-left">
-            <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
-              Select Time Slot <span className="text-rose-500">*</span>
-            </label>
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
-              {slots.map((slot) => {
-                const isSelected = selectedSlot === slot.startTime;
-                return (
-                  <button
-                    key={slot.startTime}
-                    type="button"
-                    disabled={slot.isBooked}
-                    onClick={() => setSelectedSlot(slot.startTime)}
-                    className={`py-2 px-3 rounded-lg text-xs font-mono font-medium border text-center transition ${
-                      slot.isBooked
-                        ? 'bg-slate-100 dark:bg-slate-800/40 text-slate-400 border-slate-200 dark:border-slate-800 cursor-not-allowed line-through'
-                        : isSelected
-                        ? 'bg-teal-600 text-white border-teal-700 shadow-sm font-bold'
-                        : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:border-teal-500'
-                    }`}
-                  >
-                    {slot.startTime}
-                  </button>
-                );
-              })}
+          {errorMessage && (
+            <div className="p-3 rounded-lg bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-900 text-xs text-rose-700 dark:text-rose-300 flex items-center justify-between">
+              <span>{errorMessage}</span>
+              <button
+                type="button"
+                onClick={() => setErrorMessage(null)}
+                className="text-rose-500 hover:text-rose-700 font-bold ml-2"
+              >
+                &times;
+              </button>
             </div>
+          )}
+
+          {/* Time Slot Picker */}
+          <div className="space-y-2 text-left">
+            <div className="flex items-center justify-between">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Select Consultation Slot <span className="text-rose-500">*</span>
+              </label>
+              <span className="text-xs font-medium text-teal-700 dark:text-teal-300 bg-teal-50 dark:bg-teal-950/80 px-2.5 py-0.5 rounded-full border border-teal-200 dark:border-teal-800">
+                {slotDurationMinutes}-Minute Consultation Slots
+              </span>
+            </div>
+
+            {isLoadingSlots ? (
+              <div className="p-4 text-center text-xs text-slate-500 animate-pulse">
+                Loading schedule-derived slots...
+              </div>
+            ) : slots.length === 0 ? (
+              <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-900 text-xs text-amber-800 dark:text-amber-300">
+                No active consultation slots configured for this date. Please choose another date or doctor.
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {slots.map((slot) => {
+                  const isSelected = selectedSlot === slot.startTime;
+                  return (
+                    <button
+                      key={slot.startTime}
+                      type="button"
+                      disabled={slot.isBooked}
+                      onClick={() => setSelectedSlot(slot.startTime)}
+                      className={`py-2 px-2.5 rounded-lg text-xs font-mono font-medium border text-center transition ${
+                        slot.isBooked
+                          ? 'bg-slate-100 dark:bg-slate-800/40 text-slate-400 border-slate-200 dark:border-slate-800 cursor-not-allowed line-through'
+                          : isSelected
+                          ? 'bg-teal-600 text-white border-teal-700 shadow-sm font-bold ring-2 ring-teal-400/40'
+                          : 'bg-white dark:bg-slate-900 text-slate-800 dark:text-slate-200 border-slate-300 dark:border-slate-700 hover:border-teal-500'
+                      }`}
+                    >
+                      <div>{slot.startTime}</div>
+                      <div className={`text-[10px] ${isSelected ? 'text-teal-100' : 'text-slate-400'}`}>
+                        {slot.endTime}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Type & Reason */}
