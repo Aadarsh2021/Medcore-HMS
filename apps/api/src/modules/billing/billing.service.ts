@@ -19,14 +19,16 @@ import {
   CreateRefundDto,
   QueryInvoicesDto,
 } from './dto';
+import { AuditAction } from '@prisma/client';
 import {
   InvoiceStatus,
   PaymentStatus,
   PaymentMethod,
   RefundStatus,
-  AuditAction,
-} from '@prisma/client';
-import { InvoiceResponse, BillingSummaryResponse, UserRole } from '@medcore/types';
+  InvoiceResponse,
+  BillingSummaryResponse,
+  UserRole,
+} from '@medcore/types';
 
 @Injectable()
 export class BillingService {
@@ -298,7 +300,7 @@ export class BillingService {
     const issued = await this.prisma.raw.invoice.update({
       where: { id: invoiceId },
       data: {
-        status: InvoiceStatus.ISSUED,
+        status: InvoiceStatus.ISSUED as any,
         issuedAt: new Date(),
         issueDate: new Date(),
         issuedById: actor.id,
@@ -368,7 +370,7 @@ export class BillingService {
     const voided = await this.prisma.raw.invoice.update({
       where: { id: invoiceId },
       data: {
-        status: InvoiceStatus.VOID,
+        status: InvoiceStatus.VOID as any,
         voidedAt: new Date(),
         voidedById: actor.id,
         voidReason: dto.reason.trim(),
@@ -580,8 +582,8 @@ export class BillingService {
             paymentNumber,
             amount: paymentAmount,
             currency: 'INR',
-            method: dto.method,
-            status: PaymentStatus.SUCCESS,
+            method: dto.method as any,
+            status: PaymentStatus.SUCCESS as any,
             provider: dto.provider || 'MANUAL',
             transactionReference: dto.transactionReference || null,
             paidAt: new Date(),
@@ -594,7 +596,7 @@ export class BillingService {
           where: { id: invoiceId },
           data: {
             paidAmount: newPaid,
-            status: newStatus,
+            status: newStatus as any,
           },
           include: {
             patient: { include: { user: true } },
@@ -745,7 +747,7 @@ export class BillingService {
             invoiceId: payment.invoiceId,
             amount: requestedRefund,
             reason: dto.reason.trim(),
-            status: RefundStatus.SUCCESS,
+            status: RefundStatus.SUCCESS as any,
             createdById: actor.id,
             processedAt: new Date(),
           },
@@ -756,7 +758,7 @@ export class BillingService {
         if (newTotalRefundedOnPayment >= paymentAmount) {
           await tx.payment.update({
             where: { id: paymentId },
-            data: { status: PaymentStatus.REFUNDED },
+            data: { status: PaymentStatus.REFUNDED as any },
           });
         }
 
@@ -774,7 +776,7 @@ export class BillingService {
           where: { id: invoice.id },
           data: {
             refundedAmount: newInvoiceRefunded,
-            status: newInvoiceStatus,
+            status: newInvoiceStatus as any,
           },
           include: {
             patient: { include: { user: true } },
