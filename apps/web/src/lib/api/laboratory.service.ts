@@ -5,7 +5,12 @@
  *   Doctor Order -> Specimen Intake / Collection -> Processing
  *   -> Result Entry with reference ranges & abnormal flags
  *   -> Pathologist Review & Approval -> Patient & Doctor Report Viewer
+ *
+ * Production Mode: Communicates directly with NestJS Laboratory API.
+ * In production or API error states, real error states are propagated (no silent fallback to fake clinical data).
  */
+
+import { apiClient, ApiError } from './client';
 
 export interface LabOrderItem {
   id: string;
@@ -18,11 +23,13 @@ export interface LabOrderItem {
   doctorId: string;
   doctorName: string;
   encounterId?: string;
-  status: 'ORDERED' | 'SAMPLE_COLLECTED' | 'PROCESSING' | 'RESULTS_ENTERED' | 'APPROVED' | 'CANCELLED';
+  status: 'ORDERED' | 'SAMPLE_COLLECTED' | 'PROCESSING' | 'RESULTS_ENTERED' | 'APPROVED' | 'CANCELLED' | 'REJECTED';
   orderDate: string;
   specimenType: string;
   priority: 'ROUTINE' | 'URGENT' | 'STAT';
   tests: Array<{
+    id?: string;
+    testId?: string;
     code: string;
     name: string;
     category: string;
@@ -33,11 +40,35 @@ export interface LabOrderItem {
     notes?: string;
   }>;
   collectedAt?: string;
+  collectedByName?: string;
   processedAt?: string;
   approvedAt?: string;
   approvedBy?: string;
+  cancellationReason?: string;
+  specimens?: Array<{
+    id: string;
+    accessionNumber: string;
+    specimenType: string;
+    status: string;
+    collectedAt: string;
+    collectedByName?: string;
+    rejectionReason?: string;
+    notes?: string;
+  }>;
+  amendments?: Array<{
+    id: string;
+    orderItemId: string;
+    previousValue: string;
+    previousFlag?: string;
+    newValue: string;
+    newFlag?: string;
+    reason: string;
+    amendedByName: string;
+    createdAt: string;
+  }>;
 }
 
+// Development Demo Seed Orders (Available only if explicitly toggled in development)
 const SEED_LAB_ORDERS: LabOrderItem[] = [
   {
     id: 'lab-001',
@@ -198,60 +229,205 @@ const SEED_LAB_ORDERS: LabOrderItem[] = [
   },
 ];
 
+const isExplicitMockEnabled =
+  typeof process !== 'undefined' &&
+  process.env.NEXT_PUBLIC_ENABLE_LAB_MOCK === 'true';
+
 export const laboratoryService = {
-  async getOrders(): Promise<LabOrderItem[]> {
-    return SEED_LAB_ORDERS;
+  /**
+   * Fetch all laboratory orders and active worklists
+   */
+  async getOrders(filters?: { status?: string; patientId?: string; priority?: string; search?: string }): Promise<LabOrderItem[]> {
+    if (isExplicitMockEnabled) {
+      return SEED_LAB_ORDERS;
+    }
+
+    const response = await apiClient<LabOrderItem[]>('/laboratory/orders', {
+      params: filters,
+    });
+    return response.data || [];
   },
 
+  /**
+   * Fetch order details by UUID or orderNumber
+   */
   async getOrderById(id: string): Promise<LabOrderItem | null> {
-    return SEED_LAB_ORDERS.find((o) => o.id === id || o.orderNumber === id) || null;
-  },
-
-  async collectSample(orderId: string, specimenDetails: string): Promise<boolean> {
-    const order = await this.getOrderById(orderId);
-    if (order) {
-      order.status = 'SAMPLE_COLLECTED';
-      order.specimenType = specimenDetails;
-      order.collectedAt = new Date().toISOString();
-      return true;
+    if (isExplicitMockEnabled) {
+      return SEED_LAB_ORDERS.find((o) => o.id === id || o.orderNumber === id) || null;
     }
-    return false;
+
+    try {
+      const response = await apiClient<LabOrderItem>(`/laboratory/orders/${id}`);
+      return response.data || null;
+    } catch (err: any) {
+      if (err instanceof ApiError && err.statusCode === 404) {
+        return null;
+      }
+      throw err;
+    }
   },
 
+  /**
+   * Record specimen collection and barcode assignment
+   */
+  async collectSample(orderId: string, specimenDetails: string, notes?: string): Promise<boolean> {
+    if (isExplicitMockEnabled) {
+      const order = SEED_LAB_ORDERS.find((o) => o.id === orderId);
+      if (order) {
+        order.status = 'SAMPLE_COLLECTED';
+        order.specimenType = specimenDetails;
+        order.collectedAt = new Date().toISOString();
+        return true;
+      }
+      return false;
+    }
+
+    await apiClient(`/laboratory/orders/${orderId}/collect`, {
+      method: 'POST',
+      body: JSON.stringify({
+        specimenType: specimenDetails,
+        notes,
+      }),
+    });
+    return true;
+  },
+
+  /**
+   * Begin analyzer analysis on collected specimen
+   */
   async startProcessing(orderId: string): Promise<boolean> {
-    const order = await this.getOrderById(orderId);
-    if (order) {
-      order.status = 'PROCESSING';
-      order.processedAt = new Date().toISOString();
-      return true;
+    if (isExplicitMockEnabled) {
+      const order = SEED_LAB_ORDERS.find((o) => o.id === orderId);
+      if (order) {
+        order.status = 'PROCESSING';
+        order.processedAt = new Date().toISOString();
+        return true;
+      }
+      return false;
     }
-    return false;
+
+    await apiClient(`/laboratory/orders/${orderId}/process`, {
+      method: 'POST',
+    });
+    return true;
   },
 
+  /**
+   * Enter test measurements with server-side authoritative reference range evaluation
+   */
   async enterResults(
     orderId: string,
     results: Array<{ code: string; result: string; unit?: string; referenceRange?: string; flag?: any; notes?: string }>,
   ): Promise<boolean> {
-    const order = await this.getOrderById(orderId);
-    if (order) {
-      order.tests = order.tests.map((t) => {
-        const found = results.find((r) => r.code === t.code);
-        return found ? { ...t, ...found } : t;
-      });
-      order.status = 'RESULTS_ENTERED';
-      return true;
+    if (isExplicitMockEnabled) {
+      const order = SEED_LAB_ORDERS.find((o) => o.id === orderId);
+      if (order) {
+        order.tests = order.tests.map((t) => {
+          const found = results.find((r) => r.code === t.code);
+          return found ? { ...t, ...found } : t;
+        });
+        order.status = 'RESULTS_ENTERED';
+        return true;
+      }
+      return false;
     }
-    return false;
+
+    await apiClient(`/laboratory/orders/${orderId}/results`, {
+      method: 'POST',
+      body: JSON.stringify({
+        results: results.map((r) => ({
+          code: r.code,
+          resultValue: r.result,
+          unit: r.unit,
+          referenceRange: r.referenceRange,
+          flag: r.flag,
+          notes: r.notes,
+        })),
+      }),
+    });
+    return true;
   },
 
-  async approveResults(orderId: string, pathologistName: string): Promise<boolean> {
-    const order = await this.getOrderById(orderId);
-    if (order) {
-      order.status = 'APPROVED';
-      order.approvedAt = new Date().toISOString();
-      order.approvedBy = pathologistName;
-      return true;
+  /**
+   * Pathologist clinical sign-off and certification
+   */
+  async approveResults(orderId: string, pathologistName: string, remarks?: string): Promise<boolean> {
+    if (isExplicitMockEnabled) {
+      const order = SEED_LAB_ORDERS.find((o) => o.id === orderId);
+      if (order) {
+        order.status = 'APPROVED';
+        order.approvedAt = new Date().toISOString();
+        order.approvedBy = pathologistName;
+        return true;
+      }
+      return false;
     }
-    return false;
+
+    await apiClient(`/laboratory/orders/${orderId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({
+        pathologistName,
+        clinicalRemarks: remarks,
+      }),
+    });
+    return true;
+  },
+
+  /**
+   * Create laboratory diagnostic order
+   */
+  async createOrder(payload: {
+    patientId: string;
+    doctorId: string;
+    encounterId?: string;
+    priority?: any;
+    specimenType?: string;
+    clinicalNotes?: string;
+    items: Array<{ testId: string; technicianNotes?: string }>;
+  }): Promise<LabOrderItem> {
+    const response = await apiClient<LabOrderItem>('/laboratory/orders', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    return response.data!;
+  },
+
+  /**
+   * Cancel unfinalized diagnostic order
+   */
+  async cancelOrder(orderId: string, reason: string): Promise<boolean> {
+    if (isExplicitMockEnabled) {
+      const order = SEED_LAB_ORDERS.find((o) => o.id === orderId);
+      if (order) {
+        order.status = 'CANCELLED';
+        order.cancellationReason = reason;
+        return true;
+      }
+      return false;
+    }
+
+    await apiClient(`/laboratory/orders/${orderId}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    return true;
+  },
+
+  /**
+   * Retrieve diagnostic test catalog
+   */
+  async getCatalog(query?: { categoryId?: string; search?: string; page?: number; limit?: number }) {
+    const response = await apiClient<any>('/laboratory/catalog', {
+      params: query,
+    });
+    return response.data;
+  },
+
+  /**
+   * Retrieve diagnostic categories
+   */
+  async getCategories() {
+    const response = await apiClient<any[]>('/laboratory/categories');
+    return response.data || [];
   },
 };

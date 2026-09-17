@@ -126,8 +126,10 @@ export enum LabOrderStatus {
   ORDERED = 'ORDERED',
   SAMPLE_COLLECTED = 'SAMPLE_COLLECTED',
   PROCESSING = 'PROCESSING',
-  COMPLETED = 'COMPLETED',
+  RESULTS_ENTERED = 'RESULTS_ENTERED',
+  APPROVED = 'APPROVED',
   CANCELLED = 'CANCELLED',
+  REJECTED = 'REJECTED',
 }
 
 export enum InvoiceStatus {
@@ -1018,5 +1020,89 @@ export interface DispenseReturnResponse {
   quantityReturned: number;
   newBatchQuantity: number;
   movementId: string;
+}
+
+// ------------------------------------------------------------------------------
+// 10. Laboratory & Diagnostics (Phase 8)
+// ------------------------------------------------------------------------------
+
+export enum LabPriority {
+  ROUTINE = 'ROUTINE',
+  URGENT = 'URGENT',
+  STAT = 'STAT',
+}
+
+export enum LabSpecimenStatus {
+  COLLECTED = 'COLLECTED',
+  RECEIVED = 'RECEIVED',
+  PROCESSING = 'PROCESSING',
+  REJECTED = 'REJECTED',
+}
+
+export enum LabResultFlag {
+  NORMAL = 'NORMAL',
+  LOW = 'LOW',
+  HIGH = 'HIGH',
+  CRITICAL = 'CRITICAL',
+}
+
+export interface LabTestItemContract {
+  id?: string;
+  testId?: string;
+  code: string;
+  name: string;
+  category: string;
+  result?: string;
+  unit?: string;
+  referenceRange?: string;
+  flag?: LabResultFlag;
+  isCritical?: boolean;
+  notes?: string;
+}
+
+export interface LabOrderResponse {
+  id: string;
+  orderNumber: string;
+  patientId: string;
+  patientUhid: string;
+  patientName: string;
+  patientAge: number;
+  patientGender: string;
+  doctorId: string;
+  doctorName: string;
+  encounterId?: string | null;
+  status: LabOrderStatus;
+  orderDate: string;
+  specimenType?: string | null;
+  priority: LabPriority;
+  clinicalNotes?: string | null;
+  tests: LabTestItemContract[];
+  collectedAt?: string | null;
+  collectedByName?: string | null;
+  processedAt?: string | null;
+  approvedAt?: string | null;
+  approvedBy?: string | null;
+  cancellationReason?: string | null;
+  specimens?: Array<{
+    id: string;
+    accessionNumber: string;
+    specimenType: string;
+    status: LabSpecimenStatus;
+    collectedAt: string;
+    collectedByName?: string | null;
+    rejectionReason?: string | null;
+    notes?: string | null;
+  }>;
+  amendments?: Array<{
+    id: string;
+    orderItemId: string;
+    previousValue: string;
+    previousFlag?: LabResultFlag | null;
+    newValue: string;
+    newFlag?: LabResultFlag | null;
+    reason: string;
+    amendedByName: string;
+    createdAt: string;
+  }>;
 }
 

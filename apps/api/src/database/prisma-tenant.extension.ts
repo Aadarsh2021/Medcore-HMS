@@ -25,6 +25,10 @@ export const DIRECT_TENANT_MODELS = [
   'Invoice',
   'Payment',
   'PrescriptionNumberCounter',
+  'LabOrderNumberCounter',
+  'LabAccessionCounter',
+  'LabSpecimen',
+  'LabResultAmendment',
 ] as const;
 
 /**
@@ -104,6 +108,16 @@ export const INDIRECT_TENANT_MODELS: Record<
     parentIdField: 'orderId',
     parentModel: 'LabOrder',
   },
+  LabSpecimen: {
+    relation: 'order',
+    parentIdField: 'orderId',
+    parentModel: 'LabOrder',
+  },
+  LabResultAmendment: {
+    relation: 'order',
+    parentIdField: 'orderId',
+    parentModel: 'LabOrder',
+  },
   InvoiceItem: {
     relation: 'invoice',
     parentIdField: 'invoiceId',
@@ -178,6 +192,8 @@ export const RELATION_TENANT_CONSTRAINTS: Record<
     { field: 'orderId', parentModel: 'LabOrder' },
     { field: 'testId', parentModel: 'LabTest' },
   ],
+  LabSpecimen: [{ field: 'orderId', parentModel: 'LabOrder' }],
+  LabResultAmendment: [{ field: 'orderId', parentModel: 'LabOrder' }],
   Invoice: [
     { field: 'patientId', parentModel: 'Patient' },
     { field: 'appointmentId', parentModel: 'Appointment' },

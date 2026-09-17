@@ -11,6 +11,7 @@ import { MedicalRecordsModule } from './modules/medical-records/medical-records.
 import { MedicinesModule } from './modules/medicines/medicines.module';
 import { PrescriptionsModule } from './modules/prescriptions/prescriptions.module';
 import { PharmacyModule } from './modules/pharmacy/pharmacy.module';
+import { LaboratoryModule } from './modules/laboratory/laboratory.module';
 import { StorageModule } from './common/storage/storage.module';
 import { TenantContextInterceptor } from './common/interceptors/tenant-context.interceptor';
 
@@ -31,6 +32,7 @@ import { TenantContextInterceptor } from './common/interceptors/tenant-context.i
     MedicinesModule,
     PrescriptionsModule,
     PharmacyModule,
+    LaboratoryModule,
   ],
   providers: [
     {
