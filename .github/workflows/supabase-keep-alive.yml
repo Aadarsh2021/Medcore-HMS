@@ -2,8 +2,8 @@ name: Supabase Database Keep-Alive Heartbeat
 
 on:
   schedule:
-    # Runs every 3 days at 04:00 UTC (well within the 7-day inactivity window)
-    - cron: '0 4 */3 * *'
+    # Runs every 2 days at 04:00 UTC (well within Supabase's 7-day inactivity pause window)
+    - cron: '0 4 */2 * *'
   workflow_dispatch: # Allows manual one-click trigger from GitHub Actions tab
 
 jobs:
@@ -11,16 +11,38 @@ jobs:
     name: Keep Supabase Project Active
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase API Gateway (curl)
+      - name: 1. Ping Supabase API Gateway (curl)
+        continue-on-error: true
         run: |
           echo "Sending HTTP heartbeat to Supabase Gateway..."
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+          STATUS=$(curl -s --retry 3 --retry-delay 2 -o /dev/null -w "%{http_code}" \
             -H "apikey: sb_publishable_4PWubQVpA5UHZMVJfmHHgA_HP0qBw9S" \
-            "https://ihpjezapyznhzbhxfrvu.supabase.co/auth/v1/health")
-          echo "Supabase Auth Health Response Code: $STATUS"
+            "https://ihpjezapyznhzbhxfrvu.supabase.co/auth/v1/health" || echo "000")
+          echo "Supabase Auth Gateway HTTP Code: $STATUS"
           if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
-            echo "✅ Supabase HTTP Heartbeat successfully registered!"
+            echo "✅ Supabase HTTP Gateway is online!"
           else
-            echo "❌ Supabase HTTP Heartbeat failed with status $STATUS"
+            echo "⚠️ Gateway ping returned $STATUS (non-fatal, proceeding to database query)"
+          fi
+
+      - name: 2. Ping PostgreSQL Database Directly (psql)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then
+            echo "❌ Error: DATABASE_URL secret is missing in GitHub repository secrets!"
             exit 1
           fi
+
+          echo "Executing lightweight SQL query on Supabase PostgreSQL..."
+          for i in 1 2 3; do
+            if psql "$DATABASE_URL" -c "SELECT 1 as ping, current_timestamp as server_time;"; then
+              echo "✅ PostgreSQL Heartbeat successfully registered! Database will stay active."
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying in 5 seconds..."
+            sleep 5
+          done
+
+          echo "❌ Failed to connect to PostgreSQL database after 3 attempts."
+          exit 1
