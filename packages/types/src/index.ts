@@ -152,6 +152,7 @@ export enum InvoiceItemType {
 export enum PaymentMethod {
   CASH = 'CASH',
   CARD = 'CARD',
+  UPI = 'UPI',
   STRIPE = 'STRIPE',
   RAZORPAY = 'RAZORPAY',
   BANK_TRANSFER = 'BANK_TRANSFER',
@@ -160,9 +161,23 @@ export enum PaymentMethod {
 
 export enum PaymentStatus {
   PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
   SUCCESS = 'SUCCESS',
   FAILED = 'FAILED',
   REFUNDED = 'REFUNDED',
+}
+
+export enum RefundStatus {
+  PENDING = 'PENDING',
+  SUCCESS = 'SUCCESS',
+  FAILED = 'FAILED',
+}
+
+export enum WebhookProcessingStatus {
+  PENDING = 'PENDING',
+  PROCESSED = 'PROCESSED',
+  FAILED = 'FAILED',
+  IGNORED = 'IGNORED',
 }
 
 export enum NotificationChannel {
@@ -1104,5 +1119,135 @@ export interface LabOrderResponse {
     amendedByName: string;
     createdAt: string;
   }>;
+}
+
+// ------------------------------------------------------------------------------
+// 11. Billing, Invoicing & Payments (Phase 9)
+// ------------------------------------------------------------------------------
+
+export interface InvoiceLineItemContract {
+  id?: string;
+  type: InvoiceItemType;
+  description: string;
+  quantity: number;
+  unitPrice: number;
+  discount?: number;
+  tax?: number;
+  totalPrice?: number;
+  appointmentId?: string | null;
+  encounterId?: string | null;
+  prescriptionId?: string | null;
+  dispenseId?: string | null;
+  labOrderId?: string | null;
+  labTestId?: string | null;
+}
+
+export interface PaymentResponse {
+  id: string;
+  hospitalId: string;
+  invoiceId: string;
+  paymentNumber?: string | null;
+  amount: number;
+  currency: string;
+  method: PaymentMethod;
+  status: PaymentStatus;
+  provider: string;
+  providerPaymentId?: string | null;
+  providerOrderId?: string | null;
+  transactionReference?: string | null;
+  failureReason?: string | null;
+  paidAt?: string | null;
+  createdById?: string | null;
+  createdAt: string;
+}
+
+export interface RefundResponse {
+  id: string;
+  hospitalId: string;
+  paymentId: string;
+  invoiceId: string;
+  amount: number;
+  reason: string;
+  status: RefundStatus;
+  providerRefundId?: string | null;
+  createdById?: string | null;
+  processedAt?: string | null;
+  createdAt: string;
+}
+
+export interface InvoiceResponse {
+  id: string;
+  hospitalId: string;
+  patientId: string;
+  patientUhid: string;
+  patientName: string;
+  patientPhone?: string | null;
+  appointmentId?: string | null;
+  encounterId?: string | null;
+  invoiceNumber: string;
+  currency: string;
+  subtotal: number;
+  taxAmount: number;
+  discountAmount: number;
+  totalAmount: number;
+  paidAmount: number;
+  refundedAmount: number;
+  outstandingAmount: number;
+  status: InvoiceStatus;
+  issueDate?: string | null;
+  dueDate?: string | null;
+  notes?: string | null;
+  issuedAt?: string | null;
+  voidedAt?: string | null;
+  voidReason?: string | null;
+  items: InvoiceLineItemContract[];
+  payments?: PaymentResponse[];
+  refunds?: RefundResponse[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BillingSummaryResponse {
+  totalInvoiced: number;
+  totalPaid: number;
+  totalOutstanding: number;
+  totalRefunded: number;
+  invoiceCount: number;
+}
+
+export interface CreateInvoiceRequest {
+  patientId: string;
+  appointmentId?: string;
+  encounterId?: string;
+  dueDate?: string;
+  notes?: string;
+  items: Array<{
+    type?: InvoiceItemType;
+    description: string;
+    quantity: number;
+    unitPrice: number;
+    discount?: number;
+    tax?: number;
+    appointmentId?: string;
+    encounterId?: string;
+    prescriptionId?: string;
+    dispenseId?: string;
+    labOrderId?: string;
+    labTestId?: string;
+  }>;
+}
+
+export interface RecordPaymentRequest {
+  amount: number;
+  method: PaymentMethod;
+  provider?: string;
+  transactionReference?: string;
+  idempotencyKey?: string;
+}
+
+export interface CreateRefundRequest {
+  amount: number;
+  reason: string;
+  idempotencyKey?: string;
 }
 

@@ -29,6 +29,9 @@ export const DIRECT_TENANT_MODELS = [
   'LabAccessionCounter',
   'LabSpecimen',
   'LabResultAmendment',
+  'Refund',
+  'InvoiceNumberCounter',
+  'PaymentNumberCounter',
 ] as const;
 
 /**
@@ -201,6 +204,10 @@ export const RELATION_TENANT_CONSTRAINTS: Record<
   ],
   InvoiceItem: [{ field: 'invoiceId', parentModel: 'Invoice' }],
   Payment: [{ field: 'invoiceId', parentModel: 'Invoice' }],
+  Refund: [
+    { field: 'invoiceId', parentModel: 'Invoice' },
+    { field: 'paymentId', parentModel: 'Payment' },
+  ],
   Vital: [{ field: 'recordId', parentModel: 'MedicalRecord' }],
   Diagnosis: [{ field: 'recordId', parentModel: 'MedicalRecord' }],
   Allergy: [{ field: 'patientId', parentModel: 'Patient' }],
