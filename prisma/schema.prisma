@@ -135,8 +135,22 @@ enum LabOrderStatus {
   ORDERED
   SAMPLE_COLLECTED
   PROCESSING
-  COMPLETED
+  RESULTS_ENTERED
+  APPROVED
   CANCELLED
+}
+
+enum LabResultFlag {
+  NORMAL
+  LOW
+  HIGH
+  CRITICAL
+}
+
+enum LabPriority {
+  ROUTINE
+  URGENT
+  STAT
 }
 
 enum InvoiceStatus {
@@ -943,46 +957,54 @@ model LabTest {
 }
 
 model LabOrder {
-  id            String           @id @default(uuid())
-  hospitalId    String
-  hospital      Hospital         @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
-  encounterId   String
-  encounter     PatientEncounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
-  patientId     String
-  patient       Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
-  doctorId      String
-  doctor        Doctor           @relation(fields: [doctorId], references: [id], onDelete: Cascade)
-  orderDate     DateTime         @default(now())
-  status        LabOrderStatus   @default(ORDERED)
-  clinicalNotes String?
+  id              String           @id @default(uuid())
+  hospitalId      String
+  hospital        Hospital         @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  encounterId     String
+  encounter       PatientEncounter @relation(fields: [encounterId], references: [id], onDelete: Cascade)
+  patientId       String
+  patient         Patient          @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  doctorId        String
+  doctor          Doctor           @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  orderNumber     String           // e.g. LAB-2026-000001
+  orderDate       DateTime         @default(now())
+  status          LabOrderStatus   @default(ORDERED)
+  priority        LabPriority      @default(ROUTINE)
+  specimenType    String?
+  clinicalNotes   String?
+  collectedById   String?          // User ID of lab tech who collected specimen
+  collectedAt     DateTime?
+  processedAt     DateTime?
+  approvedById    String?          // User ID of pathologist who signed off
+  approvedByName  String?          // Full name string for display on report
+  approvedAt      DateTime?
 
-  items         LabOrderItem[]
+  items           LabOrderItem[]
 
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
+  @@unique([hospitalId, orderNumber])
   @@index([hospitalId, patientId])
+  @@index([hospitalId, status])
 }
 
 model LabOrderItem {
-  id                 String         @id @default(uuid())
-  orderId            String
-  order              LabOrder       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  testId             String
-  test               LabTest        @relation(fields: [testId], references: [id])
-  status             LabOrderStatus @default(ORDERED)
-  resultValue        String?
-  isAbnormal         Boolean        @default(false)
-  referenceRangeText String?
-  technicianNotes    String?
-  collectedAt        DateTime?
-  completedAt        DateTime?
-  approvedByUserId   String?
-  approvedAt         DateTime?
-  reportPdfUrl       String?
+  id                  String          @id @default(uuid())
+  orderId             String
+  order               LabOrder        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  testId              String
+  test                LabTest         @relation(fields: [testId], references: [id])
+  resultValue         String?         // Stored as string to handle "< 0.1", ranges, text results
+  resultValueNumeric  Decimal?        @db.Decimal(12, 4) // For numeric comparison / auto-flag
+  resultUnit          String?         // Unit override (falls back to LabTest.unit)
+  referenceRangeText  String?         // Display string override
+  flag                LabResultFlag?  // NORMAL | LOW | HIGH | CRITICAL — server authoritative
+  technicianNotes     String?
+  completedAt         DateTime?
 
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
 
   @@index([orderId])
 }
