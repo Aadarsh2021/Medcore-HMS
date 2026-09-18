@@ -1816,7 +1816,7 @@ describe('Phase 9 — Billing, Invoicing & Payments Integration Suite', () => {
   });
 
   it('54. should verify and accept valid signed Razorpay webhook event', () => {
-    const secret = 'rzp_secret_998877';
+    const secret = 'mock_test_webhook_secret_key';
     const payload = JSON.stringify({ id: 'evt_1', event: 'payment.captured', payload: {} });
     const validSignature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
 
@@ -1830,7 +1830,7 @@ describe('Phase 9 — Billing, Invoicing & Payments Integration Suite', () => {
   });
 
   it('55. should verify and accept valid signed Stripe webhook event', () => {
-    const secret = 'whsec_stripe_test_123';
+    const secret = 'mock_test_webhook_signing_secret';
     const payload = JSON.stringify({ id: 'evt_stripe_1', type: 'payment_intent.succeeded' });
     const timestamp = Math.floor(Date.now() / 1000);
     const signedPayload = `${timestamp}.${payload}`;

@@ -58,7 +58,7 @@ export class PaymentProviderService {
         orderId: mockOrderId,
         amount: Math.round(amount * 100), // paise
         currency,
-        keyId: process.env.RAZORPAY_KEY_ID || 'rzp_test_placeholder',
+        keyId: process.env.RAZORPAY_KEY_ID || 'gateway_test_key',
       };
     }
 
@@ -69,7 +69,7 @@ export class PaymentProviderService {
         orderId: mockPaymentIntentId,
         amount: Math.round(amount * 100), // cents
         currency,
-        keyId: process.env.STRIPE_PUBLIC_KEY || 'pk_test_placeholder',
+        keyId: process.env.STRIPE_PUBLIC_KEY || 'gateway_test_key',
       };
     }
 
@@ -148,7 +148,7 @@ export class PaymentProviderService {
     if (prov === 'RAZORPAY') {
       const event = body.event || 'unknown';
       const paymentEntity = body.payload?.payment?.entity;
-      const eventId = body.id || `rzp_evt_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+      const eventId = body.id || `provider_evt_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 
       let status: ParsedWebhookEvent['status'] = 'OTHER';
       if (event === 'payment.captured' || event === 'order.paid') {
