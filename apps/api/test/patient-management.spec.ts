@@ -41,7 +41,7 @@ describe('Phase 2 — Patient Management Module Tests', () => {
 
     // Get seeded patient in Hospital A
     const patientA = await prisma.raw.patient.findFirst({
-      where: { hospitalId: hospitalAId },
+      where: { hospitalId: hospitalAId, user: { email: 'patient.arjun@gmail.com' } },
       include: { user: true },
     });
     if (!patientA) {

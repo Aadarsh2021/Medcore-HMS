@@ -78,12 +78,37 @@ const DEPARTMENTS: DepartmentRecord[] = [
   },
 ];
 
+import { apiClient } from './client';
+
 export const departmentsService = {
   async list(): Promise<DepartmentRecord[]> {
-    return DEPARTMENTS;
+    try {
+      const response = await apiClient.get<any>('/departments');
+      if (Array.isArray(response)) {
+        return response;
+      }
+      if (response && Array.isArray(response.data)) {
+        return response.data;
+      }
+      return DEPARTMENTS;
+    } catch {
+      return DEPARTMENTS;
+    }
   },
 
   async findById(id: string): Promise<DepartmentRecord | null> {
-    return DEPARTMENTS.find((d) => d.id === id || d.code === id) || null;
+    try {
+      const response = await apiClient.get<any>(`/departments/${id}`);
+      if (response && response.data) {
+        return response.data as DepartmentRecord;
+      }
+      if (response && (response as any).id) {
+        return (response as unknown) as DepartmentRecord;
+      }
+      return DEPARTMENTS.find((d) => d.id === id || d.code === id) || null;
+    } catch {
+      return DEPARTMENTS.find((d) => d.id === id || d.code === id) || null;
+    }
   },
 };
+

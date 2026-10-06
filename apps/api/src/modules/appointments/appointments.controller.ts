@@ -203,7 +203,12 @@ export class AppointmentsController {
   // ---------------------------------------------------------------------------
 
   @Patch(':id/reschedule')
-  @Roles(UserRole.RECEPTIONIST, UserRole.HOSPITAL_ADMIN, UserRole.SUPER_ADMIN)
+  @Roles(
+    UserRole.PATIENT,
+    UserRole.RECEPTIONIST,
+    UserRole.HOSPITAL_ADMIN,
+    UserRole.SUPER_ADMIN,
+  )
   @ApiOperation({
     summary:
       'Reschedule an appointment to a new date/time slot. ' +

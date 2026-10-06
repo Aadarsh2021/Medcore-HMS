@@ -4,6 +4,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  Matches,
   MaxLength,
   MinLength,
 } from 'class-validator';
@@ -15,6 +16,9 @@ export class AddDiagnosisDto {
   @IsOptional()
   @IsString()
   @MaxLength(20)
+  @Matches(/^[A-Z][0-9]{2}(\.[0-9A-Z]{1,4})?$/i, {
+    message: 'code must be a valid ICD-10 format (e.g. J06.9, R05, I10, E11.9)',
+  })
   code?: string;
 
   @ApiProperty({ description: 'Clinical diagnostic description', example: 'Acute upper respiratory infection, unspecified' })

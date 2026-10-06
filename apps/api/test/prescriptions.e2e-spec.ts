@@ -546,6 +546,56 @@ describe('Phase 6 — Prescriptions & Medication Ordering Integration Suite', ()
         ),
       ).rejects.toThrow(BadRequestException);
     });
+
+    it('should reject doctor from Hospital B attempting to create draft in Hospital A', async () => {
+      const userDocB = { id: docBUserId, role: UserRole.DOCTOR };
+      await expect(
+        withTenant(hospitalAId, () =>
+          prescriptionsService.getOrCreateDraft(
+            hospitalAId,
+            encounterInProgressId,
+            {},
+            userDocB,
+          ),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('should reject soft-deleted doctor from creating prescription draft', async () => {
+      const deletedUser = await prisma.raw.user.create({
+        data: {
+          hospitalId: hospitalAId,
+          email: `doc.del.${Date.now()}@medcore.test`,
+          firstName: 'Deleted',
+          lastName: 'Doctor',
+          role: UserRole.DOCTOR,
+          passwordHash: '$2b$10$placeholder',
+        },
+      });
+      createdUserIds.push(deletedUser.id);
+      const deletedDoc = await prisma.raw.doctor.create({
+        data: {
+          userId: deletedUser.id,
+          hospitalId: hospitalAId,
+          departmentId: deptAId,
+          specialization: 'Internal Medicine',
+          licenseNumber: `DOC-DEL-${Date.now()}`,
+          deletedAt: new Date(),
+        },
+      });
+      createdDoctorIds.push(deletedDoc.id);
+
+      await expect(
+        withTenant(hospitalAId, () =>
+          prescriptionsService.getOrCreateDraft(
+            hospitalAId,
+            encounterInProgressId,
+            {},
+            { id: deletedUser.id, role: UserRole.DOCTOR },
+          ),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
   });
 
   // ===========================================================================
@@ -708,6 +758,29 @@ describe('Phase 6 — Prescriptions & Medication Ordering Integration Suite', ()
           ),
         ),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should reject unassigned doctor attempting to edit another doctor draft prescription', async () => {
+      const userA2 = { id: docA2UserId, role: UserRole.DOCTOR };
+      await expect(
+        withTenant(hospitalAId, () =>
+          prescriptionsService.updateDraft(
+            hospitalAId,
+            draftId,
+            {
+              items: [
+                {
+                  medicineId: medAmoxId,
+                  dosage: '1 cap',
+                  frequency: PrescriptionFrequency.BD,
+                  durationDays: 3,
+                },
+              ],
+            },
+            userA2,
+          ),
+        ),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 

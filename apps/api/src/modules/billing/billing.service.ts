@@ -9,7 +9,7 @@ import {
 import { PrismaService } from '../../database/prisma.service';
 import { InvoiceNumberService } from './invoice-number.service';
 import { IdempotencyService } from './idempotency.service';
-import { PaymentProviderService } from './payment-provider.service';
+import { PaymentProviderService, ParsedWebhookEvent } from './payment-provider.service';
 import { FinancialCalculator } from './financial-calculator';
 import {
   CreateInvoiceDto,
@@ -19,7 +19,7 @@ import {
   CreateRefundDto,
   QueryInvoicesDto,
 } from './dto';
-import { AuditAction } from '@prisma/client';
+import { AuditAction, WebhookProcessingStatus } from '@prisma/client';
 import {
   InvoiceStatus,
   PaymentStatus,
@@ -965,5 +965,219 @@ export class BillingService {
       createdAt: inv.createdAt.toISOString(),
       updatedAt: inv.updatedAt.toISOString(),
     };
+  }
+
+  /**
+   * Processes a cryptographically verified webhook payment from Stripe or Razorpay.
+   * Authoritatively updates invoice balance, creates payment record, and logs audit trail.
+   */
+  async processWebhookPayment(
+    event: ParsedWebhookEvent,
+    eventRecordId: string,
+  ): Promise<{ status: string; paymentId?: string; invoiceId?: string; message?: string }> {
+    if (event.status === 'FAILED') {
+      await this.paymentProviderService.markWebhookProcessed(
+        eventRecordId,
+        WebhookProcessingStatus.FAILED,
+        `Provider reported failure: ${event.eventType}`,
+      );
+      return { status: 'FAILED', message: `Payment failed on provider: ${event.eventType}` };
+    }
+
+    if (event.status !== 'SUCCEEDED') {
+      await this.paymentProviderService.markWebhookProcessed(
+        eventRecordId,
+        WebhookProcessingStatus.IGNORED,
+        `Unhandled event type: ${event.eventType}`,
+      );
+      return { status: 'IGNORED', message: `Unhandled event type: ${event.eventType}` };
+    }
+
+    // 1. Target Invoice Identification
+    let targetInvoiceId = event.invoiceId;
+
+    if (!targetInvoiceId && event.providerOrderId) {
+      // Try resolving by invoice number or payment counter
+      const invByNumber = await this.prisma.raw.invoice.findFirst({
+        where: { invoiceNumber: event.providerOrderId },
+        select: { id: true },
+      });
+      if (invByNumber) {
+        targetInvoiceId = invByNumber.id;
+      }
+    }
+
+    if (!targetInvoiceId) {
+      await this.paymentProviderService.markWebhookProcessed(
+        eventRecordId,
+        WebhookProcessingStatus.FAILED,
+        `Target invoice not identified in webhook event payload (invoiceId missing)`,
+      );
+      throw new NotFoundException('Invoice not found: missing invoice reference in webhook event');
+    }
+
+    // 2. Validate Amount
+    if (event.amount === undefined || event.amount <= 0) {
+      await this.paymentProviderService.markWebhookProcessed(
+        eventRecordId,
+        WebhookProcessingStatus.FAILED,
+        `Invalid or non-positive payment amount in webhook event: ${event.amount}`,
+      );
+      throw new BadRequestException('Invalid payment amount in webhook event');
+    }
+
+    // 3. Transactional Row-Locked Payment Application
+    try {
+      const result = await this.prisma.$transaction(async (tx) => {
+        // Explicit Row Lock on Invoice
+        const lockedInvoices = await tx.$queryRawUnsafe<Array<{
+          id: string;
+          hospitalId: string;
+          status: InvoiceStatus;
+          totalAmount: any;
+          paidAmount: any;
+          currency: string;
+        }>>(
+          `SELECT "id", "hospitalId", "status", "totalAmount", "paidAmount", "currency"
+           FROM "Invoice"
+           WHERE "id" = $1
+           FOR UPDATE;`,
+          targetInvoiceId,
+        );
+
+        if (!lockedInvoices || lockedInvoices.length === 0) {
+          throw new NotFoundException(`Invoice ${targetInvoiceId} not found`);
+        }
+
+        const inv = lockedInvoices[0];
+
+        // Idempotency: Check if this provider payment was already recorded
+        if (event.providerPaymentId) {
+          const existingPayment = await tx.payment.findFirst({
+            where: {
+              invoiceId: inv.id,
+              transactionReference: event.providerPaymentId,
+            },
+          });
+          if (existingPayment) {
+            this.logger.warn(
+              `Webhook duplicate: Payment ${event.providerPaymentId} already recorded for invoice ${inv.id}`,
+            );
+            return {
+              status: 'ALREADY_PROCESSED',
+              paymentId: existingPayment.id,
+              invoiceId: inv.id,
+            };
+          }
+        }
+
+        if (inv.status === InvoiceStatus.DRAFT) {
+          throw new BadRequestException('Cannot apply payment to a DRAFT invoice. Issue invoice first.');
+        }
+
+        if (inv.status === InvoiceStatus.VOID) {
+          throw new BadRequestException('Cannot apply payment to a VOID invoice');
+        }
+
+        const total = FinancialCalculator.toNumber(inv.totalAmount);
+        const currentPaid = FinancialCalculator.toNumber(inv.paidAmount);
+        const outstanding = FinancialCalculator.round2(total - currentPaid);
+
+        if (outstanding <= 0 || inv.status === InvoiceStatus.PAID) {
+          throw new BadRequestException('Invoice is already fully paid');
+        }
+
+        const paymentAmount = FinancialCalculator.round2(event.amount!);
+        if (paymentAmount > outstanding) {
+          throw new BadRequestException(
+            `Payment amount (${paymentAmount}) exceeds remaining outstanding balance (${outstanding})`,
+          );
+        }
+
+        // Generate sequential payment identifier
+        const paymentNumber = await this.invoiceNumberService.generatePaymentNumber(inv.hospitalId);
+
+        const newPaid = FinancialCalculator.round2(currentPaid + paymentAmount);
+        const newOutstanding = FinancialCalculator.round2(total - newPaid);
+        const newStatus = newOutstanding <= 0 ? InvoiceStatus.PAID : InvoiceStatus.PARTIALLY_PAID;
+
+        const paymentMethod = event.provider === 'STRIPE' ? PaymentMethod.STRIPE : PaymentMethod.RAZORPAY;
+
+        // Record Payment
+        const payment = await tx.payment.create({
+          data: {
+            hospitalId: inv.hospitalId,
+            invoiceId: inv.id,
+            paymentNumber,
+            amount: paymentAmount,
+            currency: event.currency || inv.currency || 'INR',
+            method: paymentMethod as any,
+            status: PaymentStatus.SUCCESS as any,
+            provider: event.provider,
+            transactionReference: event.providerPaymentId || null,
+            paidAt: new Date(),
+            createdById: null, // Automated webhook execution
+          },
+        });
+
+        // Update Invoice Aggregates
+        await tx.invoice.update({
+          where: { id: inv.id },
+          data: {
+            paidAmount: newPaid,
+            status: newStatus as any,
+          },
+        });
+
+        // Update PaymentProviderEvent
+        await tx.paymentProviderEvent.update({
+          where: { id: eventRecordId },
+          data: {
+            hospitalId: inv.hospitalId,
+            processingStatus: WebhookProcessingStatus.PROCESSED,
+            processedAt: new Date(),
+          },
+        });
+
+        // Audit Log
+        await tx.auditLog.create({
+          data: {
+            hospitalId: inv.hospitalId,
+            userId: null,
+            action: AuditAction.CREATE,
+            entityName: 'Payment',
+            entityId: payment.id,
+            changesJson: {
+              invoiceId: inv.id,
+              paymentNumber,
+              amount: paymentAmount,
+              method: paymentMethod,
+              provider: event.provider,
+              providerEventId: event.eventId,
+              transactionReference: event.providerPaymentId,
+              previousPaid: currentPaid,
+              newPaid,
+              invoiceStatus: newStatus,
+              source: 'WEBHOOK',
+            },
+          },
+        });
+
+        return {
+          status: 'PROCESSED',
+          paymentId: payment.id,
+          invoiceId: inv.id,
+        };
+      });
+
+      return result;
+    } catch (err: any) {
+      await this.paymentProviderService.markWebhookProcessed(
+        eventRecordId,
+        WebhookProcessingStatus.FAILED,
+        err.message || 'Payment processing transaction failed',
+      );
+      throw err;
+    }
   }
 }

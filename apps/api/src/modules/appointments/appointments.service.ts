@@ -10,7 +10,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import Redis from 'ioredis';
-import { Prisma } from '@prisma/client';
+import { Prisma, AuditAction } from '@prisma/client';
 import {
   UserRole,
   AppointmentStatus,
@@ -62,6 +62,19 @@ export class AppointmentsService {
     if (injectedRedis !== undefined) {
       this.redisClient = injectedRedis;
       this.redisInitialized = true;
+    }
+  }
+
+  private async getAuditUserId(actorId?: string): Promise<string | null> {
+    if (!actorId) return null;
+    try {
+      const user = await this.prisma.raw.user.findUnique({
+        where: { id: actorId },
+        select: { id: true },
+      });
+      return user ? user.id : null;
+    } catch {
+      return null;
     }
   }
 
@@ -453,59 +466,155 @@ export class AppointmentsService {
     // 4. Derive departmentId from doctor — never trust client input
     const departmentId = doctor.departmentId;
 
-    // 5. Validate slot and enforce maxBookingsPerSlot = 1 compatibility rule
-    const endTime = await this.validateSlotAndGetEndTime(
-      tenantId,
-      dto.doctorId,
+    // Fetch hospital timezone for past date/time validation
+    const hospital = await this.prisma.raw.hospital.findUnique({
+      where: { id: tenantId },
+      select: { settings: true },
+    });
+    const timezone = this.schedulingService.resolveHospitalTimezone(hospital?.settings);
+
+    // Validate that appointmentDate is not in the past
+    const nowUtc = new Date();
+    const apptDateTimeUtc = this.schedulingService.parseLocalTimeToUtc(
       dto.appointmentDate,
       dto.startTime,
+      timezone,
     );
+    // Allow a 5-minute buffer for network latency when booking immediate/current slots
+    if (apptDateTimeUtc.getTime() < nowUtc.getTime() - 5 * 60 * 1000) {
+      throw new BadRequestException(
+        `Cannot book an appointment in the past. Requested slot was '${dto.appointmentDate} ${dto.startTime}'.`,
+      );
+    }
+
+    // 5. Validate slot (or emergency bypass)
+    let endTime: string;
+    if (dto.type === AppointmentType.EMERGENCY) {
+      // PRD: Emergency bookings bypass normal slot availability and are flagged as EMERGENCY.
+      const startMin = this.schedulingService.timeToMinutes(dto.startTime);
+      const endMin = startMin + 30;
+      endTime = this.schedulingService.minutesToTime(endMin);
+    } else {
+      endTime = await this.validateSlotAndGetEndTime(
+        tenantId,
+        dto.doctorId,
+        dto.appointmentDate,
+        dto.startTime,
+      );
+    }
 
     // Convert date string to a DateTime value for storage.
     // Store as YYYY-MM-DD 00:00:00 UTC (date-only semantics per Phase 4 plan).
     const appointmentDate = new Date(`${dto.appointmentDate}T00:00:00.000Z`);
+    const newStartMin = this.schedulingService.timeToMinutes(dto.startTime);
+    const newEndMin = this.schedulingService.timeToMinutes(endTime);
 
-    // 6. ADR-002 Layers 1 + 2: Booking transaction
+    // Resolve auditUserId before transaction to prevent connection pool starvation
+    const auditUserId = await this.getAuditUserId(requestingUser?.id);
+
+    // 6. ADR-002 Layers 1 + 2: Booking transaction with Patient & Doctor conflict protection
     let created: any;
     try {
-      created = await this.prisma.raw.$transaction(async (tx) => {
-        // Layer 1: SELECT FOR UPDATE — fast rejection when slot row already exists
-        const existing = await tx.$queryRaw<{ id: string }[]>`
-          SELECT id FROM "Appointment"
-          WHERE "doctorId" = ${dto.doctorId}
-            AND "appointmentDate" = ${appointmentDate}
-            AND "startTime" = ${dto.startTime}
-            AND "status" NOT IN ('CANCELLED')
-          FOR UPDATE
-        `;
+      created = await this.prisma.raw.$transaction(
+        async (tx) => {
+          // A. Exclusive Patient Row Lock — serializes concurrent bookings for the SAME patient
+          await tx.$queryRaw`
+            SELECT id FROM "Patient"
+            WHERE id = ${patientId}
+            FOR UPDATE
+          `;
 
-        if (existing.length > 0) {
-          throw new ConflictException(
-            `The requested slot '${dto.startTime}' on '${dto.appointmentDate}' is already booked for this doctor.`,
-          );
-        }
+          // B. Patient Overlap Conflict Detection
+          // Find all non-cancelled, non-no-show appointments for this patient on this date
+          const patientAppointments = await tx.$queryRaw<{ id: string; startTime: string; endTime: string }[]>`
+            SELECT id, "startTime", "endTime"
+            FROM "Appointment"
+            WHERE "patientId" = ${patientId}
+              AND "appointmentDate" = ${appointmentDate}
+              AND "status" NOT IN ('CANCELLED', 'NO_SHOW')
+            FOR UPDATE
+          `;
 
-        // INSERT — Layer 2 unique partial index catches concurrent first-booking races
-        return tx.appointment.create({
-          data: {
-            hospitalId: tenantId,
-            patientId,
-            doctorId: dto.doctorId,
-            departmentId,
-            appointmentDate,
-            startTime: dto.startTime,
-            endTime,
-            status: AppointmentStatus.PENDING,
-            type: dto.type ?? AppointmentType.REGULAR,
-            reason: dto.reason ?? null,
-            notes: dto.notes ?? null,
-          },
-          include: this.appointmentInclude,
-        });
-      });
+          for (const existingAppt of patientAppointments) {
+            const existStartMin = this.schedulingService.timeToMinutes(existingAppt.startTime);
+            const existEndMin = this.schedulingService.timeToMinutes(existingAppt.endTime);
+
+            // Standard half-open interval overlap check: [start, end)
+            // Overlaps if: newStart < existEnd && newEnd > existStart
+            if (newStartMin < existEndMin && newEndMin > existStartMin) {
+              throw new ConflictException(
+                `Patient already has an active appointment ('${existingAppt.startTime}' - '${existingAppt.endTime}') overlapping with requested time ('${dto.startTime}' - '${endTime}').`,
+              );
+            }
+          }
+
+          // C. Layer 1 Doctor Conflict Check: SELECT FOR UPDATE on doctor slot
+          const existingDoctorAppt = await tx.$queryRaw<{ id: string }[]>`
+            SELECT id FROM "Appointment"
+            WHERE "doctorId" = ${dto.doctorId}
+              AND "appointmentDate" = ${appointmentDate}
+              AND "startTime" = ${dto.startTime}
+              AND "status" NOT IN ('CANCELLED', 'NO_SHOW')
+            FOR UPDATE
+          `;
+
+          if (existingDoctorAppt.length > 0) {
+            throw new ConflictException(
+              `The requested slot '${dto.startTime}' on '${dto.appointmentDate}' is already booked for this doctor.`,
+            );
+          }
+
+          // D. INSERT — Layer 2 unique partial index catches concurrent first-booking races for doctor slot
+          const appt = await tx.appointment.create({
+            data: {
+              hospitalId: tenantId,
+              patientId,
+              doctorId: dto.doctorId,
+              departmentId,
+              appointmentDate,
+              startTime: dto.startTime,
+              endTime,
+              status: AppointmentStatus.PENDING,
+              type: dto.type ?? AppointmentType.REGULAR,
+              reason: dto.reason ?? null,
+              notes: dto.notes ?? null,
+            },
+            include: this.appointmentInclude,
+          });
+
+          // E. Audit Log
+          await tx.auditLog.create({
+            data: {
+              hospitalId: tenantId,
+              userId: auditUserId,
+              action: AuditAction.CREATE,
+              entityName: 'Appointment',
+              entityId: appt.id,
+              changesJson: {
+                doctorId: dto.doctorId,
+                patientId,
+                appointmentDate: dto.appointmentDate,
+                startTime: dto.startTime,
+                endTime,
+                status: AppointmentStatus.PENDING,
+                type: dto.type ?? AppointmentType.REGULAR,
+              },
+            },
+          });
+
+          return appt;
+        },
+        {
+          maxWait: 15000,
+          timeout: 25000,
+        },
+      );
     } catch (err: any) {
+      if (err instanceof ConflictException) {
+        throw err;
+      }
       // Translate Prisma unique constraint violation (Layer 2 catch) to 409
-      if (err?.code === 'P2002' || err instanceof ConflictException) {
+      if (err?.code === 'P2002') {
         throw new ConflictException(
           `The requested slot '${dto.startTime}' on '${dto.appointmentDate}' is already booked for this doctor.`,
         );
@@ -537,7 +646,7 @@ export class AppointmentsService {
     const skip = (page - 1) * limit;
 
     // Build role-scoped where clause
-    let roleFilter: any = {};
+    const roleFilter: any = {};
 
     if (requestingUser.role === UserRole.PATIENT) {
       // PATIENT sees only their own appointments
@@ -735,13 +844,33 @@ export class AppointmentsService {
       );
     }
 
-    const updated = await this.prisma.raw.appointment.update({
-      where: { id: appointmentId },
-      data: {
-        status: AppointmentStatus.CANCELLED,
-        cancellationReason: dto.cancellationReason ?? null,
-      },
-      include: this.appointmentInclude,
+    const auditUserId = await this.getAuditUserId(requestingUser?.id);
+
+    const updated = await this.prisma.raw.$transaction(async (tx) => {
+      const res = await tx.appointment.update({
+        where: { id: appointmentId },
+        data: {
+          status: AppointmentStatus.CANCELLED,
+          cancellationReason: dto.cancellationReason ?? null,
+        },
+        include: this.appointmentInclude,
+      });
+
+      await tx.auditLog.create({
+        data: {
+          hospitalId: tenantId,
+          userId: auditUserId,
+          action: AuditAction.UPDATE,
+          entityName: 'Appointment',
+          entityId: appointmentId,
+          changesJson: {
+            status: AppointmentStatus.CANCELLED,
+            cancellationReason: dto.cancellationReason ?? null,
+          },
+        },
+      });
+
+      return res;
     });
 
     // ADR-002 Layer 3: Best-effort release of Redis soft-hold on cancelled slot
@@ -781,19 +910,33 @@ export class AppointmentsService {
 
     // Pre-validate the new slot BEFORE entering the transaction
     // (slot validation does not need to be inside the lock boundary)
-    let newEndTime: string;
-
     const apptForDoctor = await this.prisma.raw.appointment.findFirst({
       where: {
         id: appointmentId,
         hospitalId: tenantId,
         deletedAt: null,
       },
-      select: { doctorId: true, status: true },
+      select: {
+        id: true,
+        doctorId: true,
+        patientId: true,
+        appointmentDate: true,
+        startTime: true,
+        status: true,
+      },
     });
 
     if (!apptForDoctor) {
       throw new NotFoundException(`Appointment with ID '${appointmentId}' not found.`);
+    }
+
+    // PATIENT: may only reschedule their own appointments
+    if (requestingUser.role === UserRole.PATIENT) {
+      if (apptForDoctor.patientId !== requestingUser.patientProfile?.id) {
+        throw new ForbiddenException(
+          'Access denied: You may only reschedule your own appointments.',
+        );
+      }
     }
 
     if (TERMINAL_STATUSES.includes(apptForDoctor.status as AppointmentStatus)) {
@@ -809,8 +952,28 @@ export class AppointmentsService {
       );
     }
 
+    // Fetch hospital timezone for past date/time validation
+    const hospital = await this.prisma.raw.hospital.findUnique({
+      where: { id: tenantId },
+      select: { settings: true },
+    });
+    const timezone = this.schedulingService.resolveHospitalTimezone(hospital?.settings);
+
+    // Validate that appointmentDate is not in the past
+    const nowUtc = new Date();
+    const apptDateTimeUtc = this.schedulingService.parseLocalTimeToUtc(
+      dto.appointmentDate,
+      dto.startTime,
+      timezone,
+    );
+    if (apptDateTimeUtc.getTime() < nowUtc.getTime() - 5 * 60 * 1000) {
+      throw new BadRequestException(
+        `Cannot reschedule an appointment to the past. Requested slot was '${dto.appointmentDate} ${dto.startTime}'.`,
+      );
+    }
+
     // Validate new slot (includes maxBookingsPerSlot > 1 rejection)
-    newEndTime = await this.validateSlotAndGetEndTime(
+    const newEndTime = await this.validateSlotAndGetEndTime(
       tenantId,
       apptForDoctor.doctorId,
       dto.appointmentDate,
@@ -818,59 +981,121 @@ export class AppointmentsService {
     );
 
     const newAppointmentDate = new Date(`${dto.appointmentDate}T00:00:00.000Z`);
+    const newStartMin = this.schedulingService.timeToMinutes(dto.startTime);
+    const newEndMin = this.schedulingService.timeToMinutes(newEndTime);
+
+    const auditUserId = await this.getAuditUserId(requestingUser?.id);
 
     let updated: any;
     try {
-      updated = await this.prisma.raw.$transaction(async (tx) => {
-        // Lock the existing appointment row (holds old slot for duration of transaction)
-        const locked = await tx.$queryRaw<{ id: string; status: string }[]>`
-          SELECT id, status FROM "Appointment"
-          WHERE id = ${appointmentId}
-            AND "hospitalId" = ${tenantId}
-          FOR UPDATE
-        `;
+      updated = await this.prisma.raw.$transaction(
+        async (tx) => {
+          // Lock the existing appointment row (holds old slot for duration of transaction)
+          const locked = await tx.$queryRaw<{ id: string; status: string; patientId: string }[]>`
+            SELECT id, status, "patientId" FROM "Appointment"
+            WHERE id = ${appointmentId}
+              AND "hospitalId" = ${tenantId}
+            FOR UPDATE
+          `;
 
-        if (locked.length === 0) {
-          throw new NotFoundException(`Appointment with ID '${appointmentId}' not found.`);
-        }
+          if (locked.length === 0) {
+            throw new NotFoundException(`Appointment with ID '${appointmentId}' not found.`);
+          }
 
-        const currentStatus = locked[0].status as AppointmentStatus;
-        if (TERMINAL_STATUSES.includes(currentStatus) || currentStatus === AppointmentStatus.IN_PROGRESS) {
-          throw new BadRequestException(
-            `Appointment cannot be rescheduled in status '${currentStatus}'.`,
-          );
-        }
+          const currentStatus = locked[0].status as AppointmentStatus;
+          if (TERMINAL_STATUSES.includes(currentStatus) || currentStatus === AppointmentStatus.IN_PROGRESS) {
+            throw new BadRequestException(
+              `Appointment cannot be rescheduled in status '${currentStatus}'.`,
+            );
+          }
 
-        // Layer 1: SELECT FOR UPDATE on new slot
-        const conflicting = await tx.$queryRaw<{ id: string }[]>`
-          SELECT id FROM "Appointment"
-          WHERE "doctorId" = ${apptForDoctor.doctorId}
-            AND "appointmentDate" = ${newAppointmentDate}
-            AND "startTime" = ${dto.startTime}
-            AND "status" NOT IN ('CANCELLED')
-            AND id != ${appointmentId}
-          FOR UPDATE
-        `;
+          const patientId = locked[0].patientId;
 
-        if (conflicting.length > 0) {
-          throw new ConflictException(
-            `The requested slot '${dto.startTime}' on '${dto.appointmentDate}' is already booked. ` +
-              'Please choose a different slot.',
-          );
-        }
+          // A. Exclusive Patient Row Lock — serializes concurrent bookings/reschedules for the SAME patient
+          await tx.$queryRaw`
+            SELECT id FROM "Patient"
+            WHERE id = ${patientId}
+            FOR UPDATE
+          `;
 
-        // Atomically move to new slot; reset to PENDING
-        return tx.appointment.update({
-          where: { id: appointmentId },
-          data: {
-            appointmentDate: newAppointmentDate,
-            startTime: dto.startTime,
-            endTime: newEndTime,
-            status: AppointmentStatus.PENDING,
-          },
-          include: this.appointmentInclude,
-        });
-      });
+          // B. Patient Overlap Conflict Detection on new slot (excluding this appointment)
+          const patientAppointments = await tx.$queryRaw<{ id: string; startTime: string; endTime: string }[]>`
+            SELECT id, "startTime", "endTime"
+            FROM "Appointment"
+            WHERE "patientId" = ${patientId}
+              AND "appointmentDate" = ${newAppointmentDate}
+              AND "status" NOT IN ('CANCELLED', 'NO_SHOW')
+              AND id != ${appointmentId}
+            FOR UPDATE
+          `;
+
+          for (const existingAppt of patientAppointments) {
+            const existStartMin = this.schedulingService.timeToMinutes(existingAppt.startTime);
+            const existEndMin = this.schedulingService.timeToMinutes(existingAppt.endTime);
+
+            if (newStartMin < existEndMin && newEndMin > existStartMin) {
+              throw new ConflictException(
+                `Patient already has an active appointment ('${existingAppt.startTime}' - '${existingAppt.endTime}') overlapping with requested time ('${dto.startTime}' - '${newEndTime}').`,
+              );
+            }
+          }
+
+          // C. Layer 1: SELECT FOR UPDATE on new doctor slot
+          const conflicting = await tx.$queryRaw<{ id: string }[]>`
+            SELECT id FROM "Appointment"
+            WHERE "doctorId" = ${apptForDoctor.doctorId}
+              AND "appointmentDate" = ${newAppointmentDate}
+              AND "startTime" = ${dto.startTime}
+              AND "status" NOT IN ('CANCELLED', 'NO_SHOW')
+              AND id != ${appointmentId}
+            FOR UPDATE
+          `;
+
+          if (conflicting.length > 0) {
+            throw new ConflictException(
+              `The requested slot '${dto.startTime}' on '${dto.appointmentDate}' is already booked. ` +
+                'Please choose a different slot.',
+            );
+          }
+
+          // D. Atomically move to new slot; reset to PENDING
+          const res = await tx.appointment.update({
+            where: { id: appointmentId },
+            data: {
+              appointmentDate: newAppointmentDate,
+              startTime: dto.startTime,
+              endTime: newEndTime,
+              status: AppointmentStatus.PENDING,
+            },
+            include: this.appointmentInclude,
+          });
+
+          // E. Audit Log
+          await tx.auditLog.create({
+            data: {
+              hospitalId: tenantId,
+              userId: auditUserId,
+              action: AuditAction.UPDATE,
+              entityName: 'Appointment',
+              entityId: appointmentId,
+              changesJson: {
+                oldAppointmentDate: apptForDoctor.appointmentDate,
+                oldStartTime: apptForDoctor.startTime,
+                newAppointmentDate: dto.appointmentDate,
+                newStartTime: dto.startTime,
+                newEndTime,
+                status: AppointmentStatus.PENDING,
+              },
+            },
+          });
+
+          return res;
+        },
+        {
+          maxWait: 15000,
+          timeout: 25000,
+        },
+      );
     } catch (err: any) {
       if (err?.code === 'P2002' || err instanceof ConflictException) {
         throw new ConflictException(
@@ -881,7 +1106,11 @@ export class AppointmentsService {
       throw err;
     }
 
-    // ADR-002 Layer 3: Post-commit Redis soft-hold on new slot (best-effort, non-blocking)
+    // Release old soft-hold and set new soft-hold
+    const oldDateStr = apptForDoctor.appointmentDate instanceof Date
+      ? apptForDoctor.appointmentDate.toISOString().slice(0, 10)
+      : String(apptForDoctor.appointmentDate).slice(0, 10);
+    void this.releaseSoftHold(apptForDoctor.doctorId, oldDateStr, apptForDoctor.startTime);
     void this.setSoftHold(apptForDoctor.doctorId, dto.appointmentDate, dto.startTime);
 
     return this.formatAppointmentResponse(updated);

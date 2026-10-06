@@ -147,6 +147,23 @@ enum LabSpecimenStatus {
   REJECTED
 }
 
+enum RoomType {
+  GENERAL_WARD
+  SEMI_PRIVATE
+  PRIVATE
+  ICU
+  NICU
+  EMERGENCY
+  OPERATION_THEATER
+}
+
+enum BedStatus {
+  AVAILABLE
+  OCCUPIED
+  MAINTENANCE
+  RESERVED
+}
+
 enum LabResultFlag {
   NORMAL
   LOW
@@ -277,6 +294,8 @@ model Hospital {
   stockReceipts    StockReceipt[]
   stockMovements   StockMovement[]
   prescriptionDispenses PrescriptionDispense[]
+  dispenseCounters     DispenseNumberCounter[]
+  stockReceiptCounters StockReceiptNumberCounter[]
   idempotencyRecords IdempotencyRecord[]
   labCategories    LabCategory[]
   labTests         LabTest[]
@@ -292,6 +311,9 @@ model Hospital {
   paymentCounters  PaymentNumberCounter[]
   webhookEvents    PaymentProviderEvent[]
   auditLogs        AuditLog[]
+  rooms            Room[]
+  beds             Bed[]
+  bedAssignments   BedAssignment[]
 
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -362,12 +384,87 @@ model Department {
 
   doctors      Doctor[]
   appointments Appointment[]
+  rooms        Room[]
 
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
   @@unique([hospitalId, code])
   @@index([hospitalId])
+}
+
+// ------------------------------------------------------------------------------
+// ROOMS & BEDS INFRASTRUCTURE
+// ------------------------------------------------------------------------------
+
+model Room {
+  id           String        @id @default(uuid())
+  hospitalId   String
+  hospital     Hospital      @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  departmentId String?
+  department   Department?   @relation(fields: [departmentId], references: [id], onDelete: SetNull)
+  roomNumber   String
+  name         String?
+  type         RoomType      @default(GENERAL_WARD)
+  floor        String?
+  building     String?
+  dailyRate    Decimal       @default(0) @db.Decimal(10, 2)
+  isActive     Boolean       @default(true)
+
+  beds         Bed[]
+
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  @@unique([hospitalId, roomNumber])
+  @@index([hospitalId])
+}
+
+model Bed {
+  id                 String             @id @default(uuid())
+  hospitalId         String
+  hospital           Hospital           @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  roomId             String
+  room               Room               @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  bedNumber          String
+  status             BedStatus          @default(AVAILABLE)
+  currentPatientId   String?
+  currentPatient     Patient?           @relation(fields: [currentPatientId], references: [id], onDelete: SetNull)
+  currentEncounterId String?
+  currentEncounter   PatientEncounter?  @relation(fields: [currentEncounterId], references: [id], onDelete: SetNull)
+  assignedAt         DateTime?
+
+  assignments        BedAssignment[]
+
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  @@unique([hospitalId, roomId, bedNumber])
+  @@index([hospitalId, status])
+}
+
+model BedAssignment {
+  id              String            @id @default(uuid())
+  hospitalId      String
+  hospital        Hospital          @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  bedId           String
+  bed             Bed               @relation(fields: [bedId], references: [id], onDelete: Cascade)
+  patientId       String
+  patient         Patient           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  encounterId     String?
+  encounter       PatientEncounter? @relation(fields: [encounterId], references: [id], onDelete: SetNull)
+  admittedAt      DateTime          @default(now())
+  dischargedAt    DateTime?
+  dischargeReason String?
+  admittedById    String?
+  dischargedById  String?
+  notes           String?
+
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+
+  @@index([hospitalId, patientId])
+  @@index([bedId])
 }
 
 model Doctor {
@@ -456,6 +553,8 @@ model Patient {
   appointments            Appointment[]
   encounters              PatientEncounter[]
   medicalRecords          MedicalRecord[]
+  beds                    Bed[]
+  bedAssignments          BedAssignment[]
   prescriptions           Prescription[]
   labOrders               LabOrder[]
   invoices                Invoice[]
@@ -525,6 +624,8 @@ model PatientEncounter {
   prescription  Prescription?
   labOrders     LabOrder[]
   invoice       Invoice?
+  beds          Bed[]
+  bedAssignments BedAssignment[]
 
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
@@ -691,6 +792,7 @@ model MedicalRecordAmendment {
   content         String
   createdAt       DateTime         @default(now())
 
+  @@unique([recordId, amendmentNumber])
   @@index([recordId])
 }
 
@@ -754,6 +856,7 @@ model PrescriptionItem {
   createdAt         DateTime              @default(now())
 
   @@index([prescriptionId])
+  @@index([prescriptionId, medicineId])
 }
 
 model PrescriptionNumberCounter {
@@ -887,6 +990,7 @@ model StockMovement {
   @@index([hospitalId, batchId])
   @@index([hospitalId, medicineId])
   @@index([hospitalId, movementType])
+  @@index([hospitalId, batchId, movementType])
   @@index([hospitalId, createdAt])
 }
 
@@ -929,6 +1033,34 @@ model PrescriptionDispenseItem {
   @@index([dispenseId])
   @@index([prescriptionItemId])
   @@index([batchId])
+}
+
+model DispenseNumberCounter {
+  id         String   @id @default(uuid())
+  hospitalId String
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  year       Int
+  lastNumber Int      @default(0)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([hospitalId, year])
+  @@index([hospitalId])
+}
+
+model StockReceiptNumberCounter {
+  id         String   @id @default(uuid())
+  hospitalId String
+  hospital   Hospital @relation(fields: [hospitalId], references: [id], onDelete: Cascade)
+  year       Int
+  lastNumber Int      @default(0)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@unique([hospitalId, year])
+  @@index([hospitalId])
 }
 
 model IdempotencyRecord {
@@ -1027,6 +1159,7 @@ model LabOrder {
   @@index([hospitalId, patientId])
   @@index([hospitalId, status])
   @@index([hospitalId, doctorId])
+  @@index([hospitalId, encounterId])
 }
 
 model LabOrderItem {

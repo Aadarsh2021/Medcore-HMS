@@ -143,7 +143,7 @@ export const GlobalSearch: React.FC<GlobalSearchProps> = ({ isOpen, onClose }) =
             ))
           ) : (
             <div className="p-8 text-center text-xs text-slate-500">
-              No matching hospital records found for "{query}".
+              No matching hospital records found for &ldquo;{query}&rdquo;.
             </div>
           )}
         </div>

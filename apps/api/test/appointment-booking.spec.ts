@@ -32,10 +32,12 @@ describe('Phase 4 — Appointment Booking', () => {
   let hospitalAId: string;
   let hospitalBId: string;
   let deptAId: string;
-  let doctorAId: string;     // doctor in Hospital A
+  let doctorAId: string;     // doctor 1 in Hospital A
+  let doctorA2Id: string;    // doctor 2 in Hospital A
   let doctorBId: string;     // doctor in Hospital B
   let patientAId: string;    // patient in Hospital A
   let patientBId: string;    // patient in Hospital A (second patient)
+  let patientHospitalBId: string; // patient in Hospital B
   let doctorUserId: string;
   let patientAUserId: string;
   let patientBUserId: string;
@@ -241,6 +243,60 @@ describe('Phase 4 — Appointment Booking', () => {
     patientBId = patientBRecord.id;
     createdUserIds.push(patientBUserId);
     createdPatientIds.push(patientBId);
+
+    // Create Doctor A2 in Hospital A (for patient conflict with different doctor)
+    const doctorA2Email = `dr.appttest2.${Date.now()}@medcore-test.com`;
+    const doctorA2 = await withTenant(hospitalAId, () =>
+      doctorsService.create(hospitalAId, {
+        email: doctorA2Email,
+        firstName: 'Appt2',
+        lastName: 'DoctorTwo',
+        departmentId: deptAId,
+        specialization: 'Internal Medicine',
+        licenseNumber: `LIC-APPT2-${Date.now()}`,
+        consultationFee: 120,
+      }),
+    );
+    doctorA2Id = doctorA2.id;
+    createdDoctorIds.push(doctorA2Id);
+    createdUserIds.push(doctorA2.userId);
+
+    // Set availability for Doctor A2: Monday 09:00-12:00, 30-min slots
+    await prisma.raw.doctorAvailability.create({
+      data: {
+        doctorId: doctorA2Id,
+        dayOfWeek: 1, // Monday
+        startTime: '09:00',
+        endTime: '12:00',
+        slotDurationMinutes: 30,
+        maxBookingsPerSlot: 1,
+        isActive: true,
+      },
+    });
+
+    // Create a Patient belonging to Hospital B (for cross-tenant patient test)
+    const patientHospBUser = await prisma.raw.user.create({
+      data: {
+        hospitalId: hospitalBId,
+        email: `patient.hospb.${Date.now()}@medcore-test.com`,
+        passwordHash: SUPABASE_MANAGED_PASSWORD_HASH,
+        role: UserRole.PATIENT,
+        firstName: 'Charlie',
+        lastName: 'HospitalB',
+      },
+    });
+    const patientHospBRecord = await prisma.raw.patient.create({
+      data: {
+        hospitalId: hospitalBId,
+        userId: patientHospBUser.id,
+        uhid: `UHID-PHB-${Date.now()}`,
+        dateOfBirth: new Date('1992-02-02'),
+        gender: 'OTHER',
+      },
+    });
+    patientHospitalBId = patientHospBRecord.id;
+    createdUserIds.push(patientHospBUser.id);
+    createdPatientIds.push(patientHospitalBId);
   }, 60000);
 
   // ──────────────────────────────────────────────────────────────────────────
@@ -1051,6 +1107,322 @@ describe('Phase 4 — Appointment Booking', () => {
       expect(lastCall).toContain('***');
 
       loggerWarnSpy.mockRestore();
+    });
+  });
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // 9. Phase 2 — Comprehensive Appointment Safety & Conflict Matrix
+  // ──────────────────────────────────────────────────────────────────────────
+
+  describe('9. Phase 2 — Comprehensive Appointment Safety & Conflict Matrix', () => {
+    const P2_DATE_1 = '2027-07-05'; // Monday
+    const P2_DATE_2 = '2027-07-12'; // Monday
+    const P2_DATE_3 = '2027-07-19'; // Monday
+    const P2_DATE_RACE = '2027-07-26'; // Monday
+
+    it('Patient cannot book same-time slot with a DIFFERENT doctor → 409 ConflictException', async () => {
+      // Patient A books Doctor A at 09:00-09:30
+      const appt1 = await withTenant(hospitalAId, () =>
+        appointmentsService.bookAppointment(
+          hospitalAId,
+          { doctorId: doctorAId, appointmentDate: P2_DATE_1, startTime: '09:00' },
+          makePatientUser(patientAId, patientAUserId),
+        ),
+      );
+      createdAppointmentIds.push(appt1.id);
+
+      // Patient A attempts to book Doctor A2 at the same time (09:00-09:30)
+      await expect(
+        withTenant(hospitalAId, () =>
+          appointmentsService.bookAppointment(
+            hospitalAId,
+            { doctorId: doctorA2Id, appointmentDate: P2_DATE_1, startTime: '09:00' },
+            makePatientUser(patientAId, patientAUserId),
+          ),
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('Patient non-overlapping back-to-back slots with different doctors SUCCEED ([09:00-09:30) and [09:30-10:00))', async () => {
+      // Doctor A at 09:00 was booked above.
+      // Patient A now books Doctor A2 at 09:30-10:00 on P2_DATE_1 (adjacent, non-overlapping boundary)
+      const appt2 = await withTenant(hospitalAId, () =>
+        appointmentsService.bookAppointment(
+          hospitalAId,
+          { doctorId: doctorA2Id, appointmentDate: P2_DATE_1, startTime: '09:30' },
+          makePatientUser(patientAId, patientAUserId),
+        ),
+      );
+      createdAppointmentIds.push(appt2.id);
+
+      expect(appt2.status).toBe(AppointmentStatus.PENDING);
+      expect(appt2.startTime).toBe('09:30');
+      expect(appt2.endTime).toBe('10:00');
+    });
+
+    it('TRUE CONCURRENT PATIENT BOOKING: Two simultaneous requests for same patient with overlapping slots → exactly 1 succeeds, 1 receives 409', async () => {
+      // Clear any prior records on race date
+      await prisma.raw.appointment.deleteMany({
+        where: {
+          appointmentDate: new Date(`${P2_DATE_RACE}T00:00:00.000Z`),
+        },
+      });
+
+      // Fire 2 concurrent booking requests for Patient A at 09:00:
+      // Request 1: Doctor A
+      // Request 2: Doctor A2
+      const promises = [
+        withTenant(hospitalAId, () =>
+          appointmentsService.bookAppointment(
+            hospitalAId,
+            { doctorId: doctorAId, appointmentDate: P2_DATE_RACE, startTime: '09:00' },
+            makePatientUser(patientAId, patientAUserId),
+          ),
+        ),
+        withTenant(hospitalAId, () =>
+          appointmentsService.bookAppointment(
+            hospitalAId,
+            { doctorId: doctorA2Id, appointmentDate: P2_DATE_RACE, startTime: '09:00' },
+            makePatientUser(patientAId, patientAUserId),
+          ),
+        ),
+      ];
+
+      const results = await Promise.allSettled(promises);
+      const successes = results.filter((r) => r.status === 'fulfilled');
+      const conflicts = results.filter(
+        (r) =>
+          r.status === 'rejected' &&
+          r.reason instanceof ConflictException &&
+          r.reason.message.includes('overlapping'),
+      );
+
+      for (const r of successes) {
+        if (r.status === 'fulfilled') {
+          createdAppointmentIds.push(r.value.id);
+        }
+      }
+
+      expect(successes.length).toBe(1);
+      expect(conflicts.length).toBe(1);
+
+      // Verify DB invariant: exactly 1 appointment for Patient A on this date and time
+      const patientDbCount = await prisma.raw.appointment.count({
+        where: {
+          patientId: patientAId,
+          appointmentDate: new Date(`${P2_DATE_RACE}T00:00:00.000Z`),
+          status: { not: AppointmentStatus.CANCELLED },
+        },
+      });
+      expect(patientDbCount).toBe(1);
+    });
+
+    it('Past appointment cannot be booked → 400 BadRequestException', async () => {
+      await expect(
+        withTenant(hospitalAId, () =>
+          appointmentsService.bookAppointment(
+            hospitalAId,
+            { doctorId: doctorAId, appointmentDate: '2020-01-06', startTime: '09:00' },
+            makePatientUser(patientAId, patientAUserId),
+          ),
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('Past appointment cannot be rescheduled to → 400 BadRequestException', async () => {
+      // Book a valid future appointment
+      const appt = await withTenant(hospitalAId, () =>
+        appointmentsService.bookAppointment(
+          hospitalAId,
+          { doctorId: doctorAId, appointmentDate: P2_DATE_2, startTime: '09:00' },
+          makePatientUser(patientAId, patientAUserId),
+        ),
+      );
+      createdAppointmentIds.push(appt.id);
+
+      // Attempt to reschedule to the past
+      await expect(
+        withTenant(hospitalAId, () =>
+          appointmentsService.rescheduleAppointment(
+            hospitalAId,
+            appt.id,
+            { appointmentDate: '2020-01-06', startTime: '09:00' },
+            makeReceptionistUser(),
+          ),
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('Reschedule detects patient conflict on new slot → 409 ConflictException', async () => {
+      // Patient A has appt at 09:00 on P2_DATE_2 (from above test)
+      // Patient A books Doctor A2 at 10:00 on P2_DATE_2
+      const appt2 = await withTenant(hospitalAId, () =>
+        appointmentsService.bookAppointment(
+          hospitalAId,
+          { doctorId: doctorA2Id, appointmentDate: P2_DATE_2, startTime: '10:00' },
+          makePatientUser(patientAId, patientAUserId),
+        ),
+      );
+      createdAppointmentIds.push(appt2.id);
+
+      // Now attempt to reschedule appt2 from 10:00 to 09:00 (which collides with appt1)
+      await expect(
+        withTenant(hospitalAId, () =>
+          appointmentsService.rescheduleAppointment(
+            hospitalAId,
+            appt2.id,
+            { appointmentDate: P2_DATE_2, startTime: '09:00' },
+            makeReceptionistUser(),
+          ),
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('PATIENT cannot reschedule another patient\'s appointment → 403 ForbiddenException', async () => {
+      // Book appointment for Patient A
+      const appt = await withTenant(hospitalAId, () =>
+        appointmentsService.bookAppointment(
+          hospitalAId,
+          { doctorId: doctorAId, appointmentDate: P2_DATE_3, startTime: '09:00' },
+          makePatientUser(patientAId, patientAUserId),
+        ),
+      );
+      createdAppointmentIds.push(appt.id);
+
+      // Patient B attempts to reschedule Patient A's appointment
+      await expect(
+        withTenant(hospitalAId, () =>
+          appointmentsService.rescheduleAppointment(
+            hospitalAId,
+            appt.id,
+            { appointmentDate: P2_DATE_3, startTime: '09:30' },
+            makePatientUser(patientBId, patientBUserId),
+          ),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('Cross-tenant: Patient from Hospital B cannot be booked in Hospital A context → 404 NotFoundException', async () => {
+      await expect(
+        withTenant(hospitalAId, () =>
+          appointmentsService.bookAppointment(
+            hospitalAId,
+            {
+              doctorId: doctorAId,
+              appointmentDate: P2_DATE_3,
+              startTime: '10:00',
+              patientId: patientHospitalBId, // Patient from Hospital B
+            },
+            makeReceptionistUser(), // Receptionist in Hospital A
+          ),
+        ),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('Emergency appointment bypasses routine schedule validation and sets type EMERGENCY', async () => {
+      // 23:00 is outside Doctor A's schedule (09:00-12:00)
+      const emergencyAppt = await withTenant(hospitalAId, () =>
+        appointmentsService.bookAppointment(
+          hospitalAId,
+          {
+            doctorId: doctorAId,
+            appointmentDate: P2_DATE_3,
+            startTime: '23:00',
+            type: AppointmentType.EMERGENCY,
+          },
+          makePatientUser(patientAId, patientAUserId),
+        ),
+      );
+      createdAppointmentIds.push(emergencyAppt.id);
+
+      expect(emergencyAppt.id).toBeDefined();
+      expect(emergencyAppt.type).toBe(AppointmentType.EMERGENCY);
+      expect(emergencyAppt.startTime).toBe('23:00');
+      expect(emergencyAppt.endTime).toBe('23:30');
+    });
+
+    it('Cancelled appointment releases patient slot: Patient can book a previously conflicting time after cancellation', async () => {
+      // Patient A books Doctor A at 11:00 on P2_DATE_3
+      const apptToCancel = await withTenant(hospitalAId, () =>
+        appointmentsService.bookAppointment(
+          hospitalAId,
+          { doctorId: doctorAId, appointmentDate: P2_DATE_3, startTime: '11:00' },
+          makePatientUser(patientAId, patientAUserId),
+        ),
+      );
+      createdAppointmentIds.push(apptToCancel.id);
+
+      // Verify that booking Doctor A2 at the same 11:00 slot is initially rejected
+      await expect(
+        withTenant(hospitalAId, () =>
+          appointmentsService.bookAppointment(
+            hospitalAId,
+            { doctorId: doctorA2Id, appointmentDate: P2_DATE_3, startTime: '11:00' },
+            makePatientUser(patientAId, patientAUserId),
+          ),
+        ),
+      ).rejects.toThrow(ConflictException);
+
+      // Cancel the appointment
+      await withTenant(hospitalAId, () =>
+        appointmentsService.cancelAppointment(
+          hospitalAId,
+          apptToCancel.id,
+          { cancellationReason: 'Freeing up slot' },
+          makePatientUser(patientAId, patientAUserId),
+        ),
+      );
+
+      // Now Patient A can book Doctor A2 at 11:00!
+      const rebooked = await withTenant(hospitalAId, () =>
+        appointmentsService.bookAppointment(
+          hospitalAId,
+          { doctorId: doctorA2Id, appointmentDate: P2_DATE_3, startTime: '11:00' },
+          makePatientUser(patientAId, patientAUserId),
+        ),
+      );
+      createdAppointmentIds.push(rebooked.id);
+
+      expect(rebooked.status).toBe(AppointmentStatus.PENDING);
+      expect(rebooked.startTime).toBe('11:00');
+    });
+
+    it('Phase 2 follow-up: NO_SHOW appointment releases doctor slot: Another patient can book a slot previously marked NO_SHOW', async () => {
+      // Patient A books Doctor A at 11:30 on P2_DATE_3
+      const apptNoShow = await withTenant(hospitalAId, () =>
+        appointmentsService.bookAppointment(
+          hospitalAId,
+          { doctorId: doctorAId, appointmentDate: P2_DATE_3, startTime: '11:30' },
+          makePatientUser(patientAId, patientAUserId),
+        ),
+      );
+      createdAppointmentIds.push(apptNoShow.id);
+
+      // Transition the appointment to NO_SHOW via updateStatus
+      await withTenant(hospitalAId, () =>
+        appointmentsService.updateStatus(
+          hospitalAId,
+          apptNoShow.id,
+          { status: AppointmentStatus.NO_SHOW },
+        ),
+      );
+
+      // Now Patient B books Doctor A at the exact same 11:30 slot!
+      // This verifies that unique_doctor_active_slot (WHERE "status" NOT IN ('CANCELLED', 'NO_SHOW'))
+      // properly permits rebooking the slot at both the app layer and the DB index layer.
+      const rebookedSlot = await withTenant(hospitalAId, () =>
+        appointmentsService.bookAppointment(
+          hospitalAId,
+          { doctorId: doctorAId, appointmentDate: P2_DATE_3, startTime: '11:30' },
+          makePatientUser(patientBId, patientBUserId),
+        ),
+      );
+      createdAppointmentIds.push(rebookedSlot.id);
+
+      expect(rebookedSlot.status).toBe(AppointmentStatus.PENDING);
+      expect(rebookedSlot.startTime).toBe('11:30');
+      expect(rebookedSlot.patientId).toBe(patientBId);
+      expect(rebookedSlot.doctorId).toBe(doctorAId);
     });
   });
 });

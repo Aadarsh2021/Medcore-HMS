@@ -13,6 +13,9 @@ import {
   NotFoundException,
   UnprocessableEntityException,
 } from '@nestjs/common';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
+import { AddDiagnosisDto } from '../src/modules/encounters/dto/add-diagnosis.dto';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../src/database/prisma.service';
 import { EncountersService } from '../src/modules/encounters/encounters.service';
@@ -868,7 +871,334 @@ describe('Phase 5 — Clinical Encounters & EMR Integration Suite', () => {
       );
 
       expect(signedUrl).toBeDefined();
-      expect(signedUrl).toContain('expiresAt=');
+      expect(signedUrl).toMatch(/X-Amz-Expires=900|expiresAt=/);
+    });
+  });
+
+  // ===========================================================================
+  // SECTION F: Concurrent Clinical Mutations & Race Condition Resilience
+  // ===========================================================================
+  describe('F. Concurrent Clinical Mutations & Race Condition Resilience', () => {
+    let completedEncounterId: string;
+
+    beforeAll(async () => {
+      // Create and complete an encounter for concurrent amendment testing
+      const appt = await prisma.raw.appointment.create({
+        data: {
+          hospitalId: hospitalAId,
+          patientId: patA1Id,
+          doctorId: docA1Id,
+          departmentId: deptAId,
+          appointmentDate: new Date('2027-03-01'),
+          startTime: '09:00',
+          endTime: '09:30',
+          status: AppointmentStatus.CONFIRMED,
+          reason: 'Severe migraine for concurrency test',
+        },
+      });
+      createdAppointmentIds.push(appt.id);
+
+      const enc = await withTenant(hospitalAId, () =>
+        encountersService.startEncounter(hospitalAId, appt.id, {
+          id: docA1UserId,
+          role: UserRole.DOCTOR,
+        }),
+      );
+
+      await withTenant(hospitalAId, () =>
+        encountersService.addDiagnosis(
+          hospitalAId,
+          enc.id,
+          {
+            code: 'G43.909',
+            description: 'Migraine, unspecified, not intractable',
+            type: DiagnosisType.CONFIRMED,
+            isPrimary: true,
+          },
+          { id: docA1UserId, role: UserRole.DOCTOR },
+        ),
+      );
+
+      await withTenant(hospitalAId, () =>
+        encountersService.completeEncounter(hospitalAId, enc.id, {
+          id: docA1UserId,
+          role: UserRole.DOCTOR,
+        }),
+      );
+
+      completedEncounterId = enc.id;
+    });
+
+    it('F1: should safely handle simultaneous concurrent amendments to the same record with distinct monotonic amendment numbers', async () => {
+      // Launch 2 simultaneous amendments via Promise.all
+      const [amendment1, amendment2] = await Promise.all([
+        withTenant(hospitalAId, () =>
+          encountersService.createAmendment(
+            hospitalAId,
+            completedEncounterId,
+            {
+              amendmentType: AmendmentType.ADDENDUM,
+              section: AmendmentSection.CLINICAL_NOTES,
+              reason: 'Concurrent addendum 1',
+              content: 'Patient reported secondary symptom A',
+            },
+            { id: docA1UserId, role: UserRole.DOCTOR },
+          ),
+        ),
+        withTenant(hospitalAId, () =>
+          encountersService.createAmendment(
+            hospitalAId,
+            completedEncounterId,
+            {
+              amendmentType: AmendmentType.ADDENDUM,
+              section: AmendmentSection.CLINICAL_NOTES,
+              reason: 'Concurrent addendum 2',
+              content: 'Patient reported secondary symptom B',
+            },
+            { id: docA1UserId, role: UserRole.DOCTOR },
+          ),
+        ),
+      ]);
+
+      expect(amendment1).toBeDefined();
+      expect(amendment2).toBeDefined();
+      expect(amendment1.id).not.toBe(amendment2.id);
+
+      // Amendment numbers must be strictly distinct and sequential (1 and 2)
+      const numbers = [amendment1.amendmentNumber, amendment2.amendmentNumber].sort((a, b) => a - b);
+      expect(numbers[0]).toBe(1);
+      expect(numbers[1]).toBe(2);
+
+      // Verify in DB that exactly 2 amendments exist with amendment numbers 1 and 2
+      const amendmentsInDb = await prisma.raw.medicalRecordAmendment.findMany({
+        where: { recordId: amendment1.recordId },
+        orderBy: { amendmentNumber: 'asc' },
+      });
+      expect(amendmentsInDb.length).toBe(2);
+      expect(amendmentsInDb.map((a) => a.amendmentNumber)).toEqual([1, 2]);
+    });
+
+    it('F2: should prevent simultaneous concurrent completions on the same in-progress encounter (exactly 1 succeeds)', async () => {
+      // Create fresh encounter
+      const appt = await prisma.raw.appointment.create({
+        data: {
+          hospitalId: hospitalAId,
+          patientId: patA1Id,
+          doctorId: docA1Id,
+          departmentId: deptAId,
+          appointmentDate: new Date('2027-03-02'),
+          startTime: '10:00',
+          endTime: '10:30',
+          status: AppointmentStatus.CONFIRMED,
+          reason: 'Checkup for concurrent completion',
+        },
+      });
+      createdAppointmentIds.push(appt.id);
+
+      const enc = await withTenant(hospitalAId, () =>
+        encountersService.startEncounter(hospitalAId, appt.id, {
+          id: docA1UserId,
+          role: UserRole.DOCTOR,
+        }),
+      );
+
+      await withTenant(hospitalAId, () =>
+        encountersService.addDiagnosis(
+          hospitalAId,
+          enc.id,
+          {
+            code: 'Z00.00',
+            description: 'General adult medical examination',
+            type: DiagnosisType.CONFIRMED,
+            isPrimary: true,
+          },
+          { id: docA1UserId, role: UserRole.DOCTOR },
+        ),
+      );
+
+      // Fire 2 concurrent completeEncounter requests
+      const results = await Promise.allSettled([
+        withTenant(hospitalAId, () =>
+          encountersService.completeEncounter(hospitalAId, enc.id, {
+            id: docA1UserId,
+            role: UserRole.DOCTOR,
+          }),
+        ),
+        withTenant(hospitalAId, () =>
+          encountersService.completeEncounter(hospitalAId, enc.id, {
+            id: docA1UserId,
+            role: UserRole.DOCTOR,
+          }),
+        ),
+      ]);
+
+      const fulfilled = results.filter((r) => r.status === 'fulfilled');
+      const rejected = results.filter((r) => r.status === 'rejected');
+
+      // Exactly 1 must succeed and exactly 1 must be rejected
+      expect(fulfilled.length).toBe(1);
+      expect(rejected.length).toBe(1);
+
+      // The rejected one should throw BadRequestException
+      const reason = (rejected[0] as PromiseRejectedResult).reason;
+      expect(reason).toBeInstanceOf(BadRequestException);
+    });
+
+    it('F3: should handle simultaneous concurrent startEncounter calls idempotently', async () => {
+      const appt = await prisma.raw.appointment.create({
+        data: {
+          hospitalId: hospitalAId,
+          patientId: patA1Id,
+          doctorId: docA1Id,
+          departmentId: deptAId,
+          appointmentDate: new Date('2027-03-03'),
+          startTime: '11:00',
+          endTime: '11:30',
+          status: AppointmentStatus.CONFIRMED,
+          reason: 'Concurrent start check',
+        },
+      });
+      createdAppointmentIds.push(appt.id);
+
+      // Launch 2 simultaneous startEncounter calls
+      const [start1, start2] = await Promise.all([
+        withTenant(hospitalAId, () =>
+          encountersService.startEncounter(hospitalAId, appt.id, {
+            id: docA1UserId,
+            role: UserRole.DOCTOR,
+          }),
+        ),
+        withTenant(hospitalAId, () =>
+          encountersService.startEncounter(hospitalAId, appt.id, {
+            id: docA1UserId,
+            role: UserRole.DOCTOR,
+          }),
+        ),
+      ]);
+
+      expect(start1.id).toBe(start2.id);
+      expect(start1.status).toBe(EncounterStatus.IN_PROGRESS);
+      expect(start2.status).toBe(EncounterStatus.IN_PROGRESS);
+    });
+  });
+
+  // ===========================================================================
+  // SECTION G: Diagnosis & ICD-10 Validation
+  // ===========================================================================
+  describe('G. Diagnosis Support & ICD-10 Format Validation', () => {
+    it('G1: should validate valid ICD-10 codes (e.g. J06.9, E11.9, I10, A00) and reject malformed codes', async () => {
+      const validDto = plainToInstance(AddDiagnosisDto, {
+        code: 'J06.9',
+        description: 'Acute upper respiratory infection',
+      });
+      const validErrors = await validate(validDto);
+      expect(validErrors.length).toBe(0);
+
+      const validDto2 = plainToInstance(AddDiagnosisDto, {
+        code: 'I10',
+        description: 'Essential (primary) hypertension',
+      });
+      const validErrors2 = await validate(validDto2);
+      expect(validErrors2.length).toBe(0);
+
+      const invalidDto = plainToInstance(AddDiagnosisDto, {
+        code: 'INVALID_ICD_CODE',
+        description: 'Bad code format',
+      });
+      const invalidErrors = await validate(invalidDto);
+      expect(invalidErrors.length).toBeGreaterThan(0);
+      expect(invalidErrors[0].constraints?.matches).toBeDefined();
+
+      const invalidDto2 = plainToInstance(AddDiagnosisDto, {
+        code: '123.45',
+        description: 'Numeric starting code is not ICD-10',
+      });
+      const invalidErrors2 = await validate(invalidDto2);
+      expect(invalidErrors2.length).toBeGreaterThan(0);
+    });
+  });
+
+  // ===========================================================================
+  // SECTION H: Non-Clinical Roles Access Restriction (RBAC)
+  // ===========================================================================
+  describe('H. Strict Clinical RBAC Restrictions', () => {
+    it('H1: should reject RECEPTIONIST attempting to access clinical patient summary with 403', async () => {
+      await expect(
+        withTenant(hospitalAId, () =>
+          medicalRecordsService.getPatientSummary(hospitalAId, patA1Id, {
+            id: recAUserId,
+            role: UserRole.RECEPTIONIST,
+          }),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('H2: should reject ACCOUNTANT attempting to access clinical patient summary with 403', async () => {
+      await expect(
+        withTenant(hospitalAId, () =>
+          medicalRecordsService.getPatientSummary(hospitalAId, patA1Id, {
+            id: 'mock-accountant-id',
+            role: UserRole.ACCOUNTANT,
+          }),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('H3: should reject PHARMACIST attempting to access clinical patient summary with 403', async () => {
+      await expect(
+        withTenant(hospitalAId, () =>
+          medicalRecordsService.getPatientSummary(hospitalAId, patA1Id, {
+            id: 'mock-pharmacist-id',
+            role: UserRole.PHARMACIST,
+          }),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('H4: should reject LAB_TECHNICIAN attempting to access clinical patient summary with 403', async () => {
+      await expect(
+        withTenant(hospitalAId, () =>
+          medicalRecordsService.getPatientSummary(hospitalAId, patA1Id, {
+            id: 'mock-labtech-id',
+            role: UserRole.LAB_TECHNICIAN,
+          }),
+        ),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  // ===========================================================================
+  // SECTION I: Audit Logging & Sensitive Data Redaction
+  // ===========================================================================
+  describe('I. Clinical Audit Trails & Data Protection', () => {
+    it('I1: should produce verified audit log entries for clinical operations with actor and tenant attribution', async () => {
+      const logs = await prisma.raw.auditLog.findMany({
+        where: {
+          hospitalId: hospitalAId,
+          userId: docA1UserId,
+        },
+      });
+
+      expect(logs.length).toBeGreaterThan(0);
+      const entityNames = logs.map((l) => l.entityName);
+      expect(entityNames).toContain('PatientEncounter');
+      expect(entityNames).toContain('MedicalRecordAmendment');
+    });
+
+    it('I2: audit log changesJson must NOT contain credentials, password hashes, or bearer tokens', async () => {
+      const logs = await prisma.raw.auditLog.findMany({
+        where: {
+          hospitalId: hospitalAId,
+          userId: docA1UserId,
+        },
+      });
+
+      for (const log of logs) {
+        const jsonStr = JSON.stringify(log.changesJson || {});
+        expect(jsonStr).not.toContain('password');
+        expect(jsonStr).not.toContain('token');
+        expect(jsonStr).not.toContain('secret');
+      }
     });
   });
 });

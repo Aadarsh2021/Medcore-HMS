@@ -1627,4 +1627,225 @@ describe('Phase 8 — Laboratory & Diagnostics Management Integration Suite', ()
       expect(jsonStr).not.toContain('bearer');
     });
   });
+
+  // ===========================================================================
+  // 54–57. Phase 4A Hardened Concurrency & Security Assertions
+  // ===========================================================================
+  it('45. [Concurrency] should safely handle simultaneous specimen collections (exactly one succeeds)', async () => {
+    const order = await withTenant(hospitalAId, () =>
+      laboratoryService.createOrder(
+        hospitalAId,
+        { id: doctorAUserId, role: UserRole.DOCTOR },
+        {
+          patientId: patientAId,
+          doctorId: doctorAId,
+          items: [{ testId: testCbcId }],
+        },
+      ),
+    );
+    createdOrderIds.push(order.id);
+
+    // Launch simultaneous collections for the exact same order
+    const [res1, res2] = await Promise.allSettled([
+      withTenant(hospitalAId, () =>
+        laboratoryService.collectSpecimen(
+          hospitalAId,
+          { id: labTechAUserId, role: UserRole.LAB_TECHNICIAN, firstName: 'Tech', lastName: 'Alpha' },
+          order.id,
+          { specimenType: 'Venous Blood' },
+        ),
+      ),
+      withTenant(hospitalAId, () =>
+        laboratoryService.collectSpecimen(
+          hospitalAId,
+          { id: labTechAUserId, role: UserRole.LAB_TECHNICIAN, firstName: 'Tech', lastName: 'Beta' },
+          order.id,
+          { specimenType: 'Venous Blood' },
+        ),
+      ),
+    ]);
+
+    const successes = [res1, res2].filter((r) => r.status === 'fulfilled');
+    const failures = [res1, res2].filter((r) => r.status === 'rejected');
+
+    expect(successes.length).toBe(1);
+    expect(failures.length).toBe(1);
+
+    // Verify database has exactly 1 active specimen
+    const activeSpecimens = await prisma.raw.labSpecimen.findMany({
+      where: { orderId: order.id, status: { not: 'REJECTED' } },
+    });
+    expect(activeSpecimens.length).toBe(1);
+  });
+
+  it('46. [Concurrency] should safely serialize simultaneous result entries with row-level locks', async () => {
+    const order = await withTenant(hospitalAId, () =>
+      laboratoryService.createOrder(
+        hospitalAId,
+        { id: doctorAUserId, role: UserRole.DOCTOR },
+        {
+          patientId: patientAId,
+          doctorId: doctorAId,
+          items: [{ testId: testCbcId }, { testId: testPotassiumId }],
+        },
+      ),
+    );
+    createdOrderIds.push(order.id);
+
+    await withTenant(hospitalAId, () =>
+      laboratoryService.collectSpecimen(hospitalAId, { id: labTechAUserId, role: UserRole.LAB_TECHNICIAN }, order.id, { specimenType: 'Blood' }),
+    );
+    await withTenant(hospitalAId, () =>
+      laboratoryService.startProcessing(hospitalAId, { id: labTechAUserId, role: UserRole.LAB_TECHNICIAN }, order.id),
+    );
+
+    // Simultaneous result entries for different items on the same order
+    const [res1, res2] = await Promise.allSettled([
+      withTenant(hospitalAId, () =>
+        laboratoryService.enterResults(
+          hospitalAId,
+          { id: labTechAUserId, role: UserRole.LAB_TECHNICIAN },
+          order.id,
+          { results: [{ orderItemId: order.tests[0].id, resultValue: '13.8' }] },
+        ),
+      ),
+      withTenant(hospitalAId, () =>
+        laboratoryService.enterResults(
+          hospitalAId,
+          { id: labTechAUserId, role: UserRole.LAB_TECHNICIAN },
+          order.id,
+          { results: [{ orderItemId: order.tests[1].id, resultValue: '4.2' }] },
+        ),
+      ),
+    ]);
+
+    // Both succeed without race condition / deadlock corruption
+    expect(res1.status).toBe('fulfilled');
+    expect(res2.status).toBe('fulfilled');
+
+    const updated = await withTenant(hospitalAId, () =>
+      laboratoryService.getOrderById(hospitalAId, { id: doctorAUserId, role: UserRole.DOCTOR }, order.id),
+    );
+    expect(updated.status).toBe(LabOrderStatus.RESULTS_ENTERED);
+    const test1 = updated.tests.find((t: any) => t.id === order.tests[0].id);
+    const test2 = updated.tests.find((t: any) => t.id === order.tests[1].id);
+    expect(test1?.result).toBe('13.8');
+    expect(test2?.result).toBe('4.2');
+  });
+
+  it('47. [Security] should reject ordering doctor identity spoofing (Doctor A ordering as Doctor B)', async () => {
+    await expect(
+      withTenant(hospitalAId, () =>
+        laboratoryService.createOrder(
+          hospitalAId,
+          { id: doctorAUserId, role: UserRole.DOCTOR },
+          {
+            patientId: patientAId,
+            doctorId: doctorBId, // Doctor B's ID while authenticated as Doctor A
+            items: [{ testId: testCbcId }],
+          },
+        ),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('48. [Security] should reject certification/approval by a doctor belonging to another hospital facility', async () => {
+    const order = await withTenant(hospitalAId, () =>
+      laboratoryService.createOrder(
+        hospitalAId,
+        { id: doctorAUserId, role: UserRole.DOCTOR },
+        {
+          patientId: patientAId,
+          doctorId: doctorAId,
+          items: [{ testId: testCbcId }],
+        },
+      ),
+    );
+    createdOrderIds.push(order.id);
+
+    await withTenant(hospitalAId, () =>
+      laboratoryService.collectSpecimen(hospitalAId, { id: labTechAUserId, role: UserRole.LAB_TECHNICIAN }, order.id, { specimenType: 'Blood' }),
+    );
+    await withTenant(hospitalAId, () =>
+      laboratoryService.startProcessing(hospitalAId, { id: labTechAUserId, role: UserRole.LAB_TECHNICIAN }, order.id),
+    );
+    await withTenant(hospitalAId, () =>
+      laboratoryService.enterResults(hospitalAId, { id: labTechAUserId, role: UserRole.LAB_TECHNICIAN }, order.id, {
+        results: [{ orderItemId: order.tests[0].id, resultValue: '14.5' }],
+      }),
+    );
+
+    // Doctor B belongs to Hospital B, attempts to approve in Hospital A
+    await expect(
+      withTenant(hospitalAId, () =>
+        laboratoryService.approveOrder(
+          hospitalAId,
+          { id: doctorBUserId, role: UserRole.DOCTOR },
+          order.id,
+          { pathologistName: 'Dr. Cross Hospital' },
+        ),
+      ),
+    ).rejects.toThrow(ForbiddenException);
+  });
+
+  it('49. [Clinical Alert] should generate immediate in-app notification for ordering doctor on critical panic value', async () => {
+    const order = await withTenant(hospitalAId, () =>
+      laboratoryService.createOrder(
+        hospitalAId,
+        { id: doctorAUserId, role: UserRole.DOCTOR },
+        {
+          patientId: patientAId,
+          doctorId: doctorAId,
+          items: [{ testId: testPotassiumId }],
+        },
+      ),
+    );
+    createdOrderIds.push(order.id);
+
+    await withTenant(hospitalAId, () =>
+      laboratoryService.collectSpecimen(hospitalAId, { id: labTechAUserId, role: UserRole.LAB_TECHNICIAN }, order.id, { specimenType: 'Blood' }),
+    );
+    await withTenant(hospitalAId, () =>
+      laboratoryService.startProcessing(hospitalAId, { id: labTechAUserId, role: UserRole.LAB_TECHNICIAN }, order.id),
+    );
+
+    // Enter critical panic potassium: Potassium reference is 3.5 - 5.0, criticalLow is 2.8, criticalHigh is 6.2
+    // Entering 2.0 triggers critical panic alert
+    await withTenant(hospitalAId, () =>
+      laboratoryService.enterResults(hospitalAId, { id: labTechAUserId, role: UserRole.LAB_TECHNICIAN }, order.id, {
+        results: [{ orderItemId: order.tests[0].id, resultValue: '2.0' }],
+      }),
+    );
+
+    // Verify Notification record created in DB for doctorAUserId
+    const notification = await prisma.raw.notification.findFirst({
+      where: {
+        hospitalId: hospitalAId,
+        userId: doctorAUserId,
+        title: { contains: 'CRITICAL LAB ALERT' },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    expect(notification).toBeDefined();
+    expect(notification?.message).toContain(order.orderNumber);
+    expect(notification?.channel).toBe('IN_APP');
+  });
+
+  it('50. [Validation] should reject lab order with duplicate test items', async () => {
+    await expect(
+      withTenant(hospitalAId, () =>
+        laboratoryService.createOrder(
+          hospitalAId,
+          { id: doctorAUserId, role: UserRole.DOCTOR },
+          {
+            patientId: patientAId,
+            doctorId: doctorAId,
+            items: [{ testId: testCbcId }, { testId: testCbcId }], // Duplicate test
+          },
+        ),
+      ),
+    ).rejects.toThrow(BadRequestException);
+  });
 });
+

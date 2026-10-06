@@ -1,0 +1,52 @@
+# Multi-stage production Dockerfile for MedCore HMS Web Portal (@medcore/web)
+FROM node:22-alpine AS base
+RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
+WORKDIR /app
+
+# Stage 1: Install Dependencies
+FROM base AS deps
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY packages/types/package.json ./packages/types/
+COPY apps/api/package.json ./apps/api/
+COPY apps/web/package.json ./apps/web/
+COPY prisma ./prisma/
+
+RUN pnpm install --frozen-lockfile
+
+# Stage 2: Build Next.js Application
+FROM base AS builder
+COPY --from=deps /app/node_modules ./node_modules
+COPY --from=deps /app/packages/types/node_modules ./packages/types/node_modules
+COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
+COPY . .
+
+# Generate Prisma Client & Build Packages
+RUN pnpm exec prisma generate --schema=prisma/schema.prisma
+RUN pnpm --filter @medcore/types build
+ENV NEXT_TELEMETRY_DISABLED=1
+RUN pnpm --filter @medcore/web build
+
+# Stage 3: Production Runner
+FROM node:22-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=3000
+ENV NEXT_TELEMETRY_DISABLED=1
+
+RUN apk add --no-cache curl
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+USER nextjs
+
+COPY --chown=nextjs:nodejs --from=builder /app/node_modules ./node_modules
+COPY --chown=nextjs:nodejs --from=builder /app/packages ./packages
+COPY --chown=nextjs:nodejs --from=builder /app/apps/web ./apps/web
+COPY --chown=nextjs:nodejs --from=builder /app/package.json ./package.json
+
+EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD curl -f http://localhost:3000/ || exit 1
+
+CMD ["pnpm", "--filter", "@medcore/web", "start"]

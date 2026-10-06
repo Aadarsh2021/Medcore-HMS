@@ -1251,3 +1251,226 @@ export interface CreateRefundRequest {
   idempotencyKey?: string;
 }
 
+// ------------------------------------------------------------------------------
+// 12. Hospital Onboarding & Management Contracts
+// ------------------------------------------------------------------------------
+export interface HospitalResponse {
+  id: string;
+  name: string;
+  slug: string;
+  code: string;
+  email: string;
+  phone: string;
+  website?: string | null;
+  logoUrl?: string | null;
+  status: string;
+  subscriptionTier: string;
+  address?: {
+    street: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: string;
+  } | null;
+  settings?: Record<string, any> | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OnboardHospitalRequest {
+  name: string;
+  slug: string;
+  code: string;
+  email: string;
+  phone: string;
+  website?: string;
+  subscriptionTier?: string;
+  address?: {
+    street: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country?: string;
+  };
+  initialAdmin: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    password: string;
+    phone?: string;
+  };
+}
+
+export interface OnboardHospitalResponse {
+  hospital: HospitalResponse;
+  initialAdmin: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: UserRole;
+  };
+}
+
+export interface UpdateHospitalRequest {
+  name?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+  logoUrl?: string;
+  status?: string;
+  subscriptionTier?: string;
+  settings?: Record<string, any>;
+}
+
+// ------------------------------------------------------------------------------
+// 13. Department Contracts
+// ------------------------------------------------------------------------------
+export interface DepartmentResponse {
+  id: string;
+  hospitalId: string;
+  name: string;
+  code: string;
+  description?: string | null;
+  headDoctorId?: string | null;
+  headDoctorName?: string | null;
+  doctorCount: number;
+  activeAppointmentsToday: number;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateDepartmentRequest {
+  name: string;
+  code: string;
+  description?: string;
+  headDoctorId?: string;
+  isActive?: boolean;
+}
+
+export interface UpdateDepartmentRequest {
+  name?: string;
+  code?: string;
+  description?: string;
+  headDoctorId?: string | null;
+  isActive?: boolean;
+}
+
+// ------------------------------------------------------------------------------
+// 14. Rooms & Beds Contracts
+// ------------------------------------------------------------------------------
+export enum RoomType {
+  GENERAL_WARD = 'GENERAL_WARD',
+  SEMI_PRIVATE = 'SEMI_PRIVATE',
+  PRIVATE = 'PRIVATE',
+  ICU = 'ICU',
+  NICU = 'NICU',
+  EMERGENCY = 'EMERGENCY',
+  OPERATION_THEATER = 'OPERATION_THEATER',
+}
+
+export enum BedStatus {
+  AVAILABLE = 'AVAILABLE',
+  OCCUPIED = 'OCCUPIED',
+  MAINTENANCE = 'MAINTENANCE',
+  RESERVED = 'RESERVED',
+}
+
+export interface RoomResponse {
+  id: string;
+  hospitalId: string;
+  departmentId?: string | null;
+  departmentName?: string | null;
+  roomNumber: string;
+  name?: string | null;
+  type: RoomType;
+  floor?: string | null;
+  building?: string | null;
+  dailyRate: number;
+  isActive: boolean;
+  totalBeds: number;
+  availableBeds: number;
+  occupiedBeds: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BedResponse {
+  id: string;
+  hospitalId: string;
+  roomId: string;
+  roomNumber: string;
+  roomType: RoomType;
+  bedNumber: string;
+  status: BedStatus;
+  currentPatientId?: string | null;
+  currentPatientName?: string | null;
+  currentPatientUhid?: string | null;
+  currentEncounterId?: string | null;
+  assignedAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateRoomRequest {
+  departmentId?: string;
+  roomNumber: string;
+  name?: string;
+  type?: RoomType;
+  floor?: string;
+  building?: string;
+  dailyRate?: number;
+  isActive?: boolean;
+}
+
+export interface CreateBedRequest {
+  roomId: string;
+  bedNumber: string;
+}
+
+export interface AssignBedRequest {
+  patientId: string;
+  encounterId?: string;
+  notes?: string;
+}
+
+export interface ReleaseBedRequest {
+  dischargeReason?: string;
+  notes?: string;
+}
+
+// ------------------------------------------------------------------------------
+// 15. Notification & Audit Contracts
+// ------------------------------------------------------------------------------
+export interface NotificationResponse {
+  id: string;
+  hospitalId?: string | null;
+  userId: string;
+  title: string;
+  message: string;
+  channel: NotificationChannel;
+  status: NotificationStatus;
+  metadataJson?: Record<string, any> | null;
+  readAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AuditLogResponse {
+  id: string;
+  hospitalId?: string | null;
+  userId?: string | null;
+  userEmail?: string | null;
+  userName?: string | null;
+  action: string;
+  entityName: string;
+  entityId?: string | null;
+  ipAddress?: string | null;
+  changesJson?: Record<string, any> | null;
+  createdAt: string;
+}
+
+
+
+

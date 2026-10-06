@@ -47,11 +47,15 @@ export class PrescriptionsService {
       throw new BadRequestException('Tenant hospital context is required');
     }
 
-    const doctor = await this.prisma.doctor.findUnique({
-      where: { userId: currentUser.id },
+    const doctor = await this.prisma.doctor.findFirst({
+      where: {
+        userId: currentUser.id,
+        hospitalId: tenantId,
+        deletedAt: null,
+      },
     });
     if (!doctor) {
-      throw new ForbiddenException('Only registered doctors can create prescriptions');
+      throw new ForbiddenException('Only registered active doctors in this hospital can create prescriptions');
     }
 
     const encounter = await this.prisma.patientEncounter.findUnique({
@@ -184,8 +188,12 @@ export class PrescriptionsService {
       );
     }
 
-    const doctor = await this.prisma.doctor.findUnique({
-      where: { userId: currentUser.id },
+    const doctor = await this.prisma.doctor.findFirst({
+      where: {
+        userId: currentUser.id,
+        hospitalId: tenantId,
+        deletedAt: null,
+      },
     });
     if (!doctor || prescription.doctorId !== doctor.id) {
       throw new ForbiddenException('Only the prescribing doctor may edit this draft prescription');
@@ -314,8 +322,12 @@ export class PrescriptionsService {
       currentUser.role === UserRole.SUPER_ADMIN;
 
     if (!isHospitalAdmin) {
-      const doctor = await this.prisma.doctor.findUnique({
-        where: { userId: currentUser.id },
+      const doctor = await this.prisma.doctor.findFirst({
+        where: {
+          userId: currentUser.id,
+          hospitalId: tenantId,
+          deletedAt: null,
+        },
       });
       if (!doctor || prescription.doctorId !== doctor.id) {
         throw new ForbiddenException(
@@ -369,12 +381,16 @@ export class PrescriptionsService {
       throw new BadRequestException('Tenant hospital context is required');
     }
 
-    const doctor = await this.prisma.doctor.findUnique({
-      where: { userId: currentUser.id },
+    const doctor = await this.prisma.doctor.findFirst({
+      where: {
+        userId: currentUser.id,
+        hospitalId: tenantId,
+        deletedAt: null,
+      },
       include: { user: true },
     });
     if (!doctor) {
-      throw new ForbiddenException('Only registered doctors can finalize prescriptions');
+      throw new ForbiddenException('Only registered active doctors in this hospital can finalize prescriptions');
     }
 
     // Step 5A: Database Transaction (Validate -> Lock -> Allocate Number -> ISSUED -> Audit -> Commit)
@@ -593,8 +609,12 @@ export class PrescriptionsService {
       currentUser.role === UserRole.SUPER_ADMIN;
 
     if (!isHospitalAdmin) {
-      const doctor = await this.prisma.doctor.findUnique({
-        where: { userId: currentUser.id },
+      const doctor = await this.prisma.doctor.findFirst({
+        where: {
+          userId: currentUser.id,
+          hospitalId: tenantId,
+          deletedAt: null,
+        },
       });
       if (!doctor || prescription.doctorId !== doctor.id) {
         throw new ForbiddenException(
@@ -836,11 +856,18 @@ export class PrescriptionsService {
       throw new ForbiddenException('Receptionists are not authorized to view clinical prescriptions');
     }
 
-    if (currentUser.role === UserRole.DOCTOR && prescription.status === PrescriptionStatus.DRAFT) {
-      const doctor = await this.prisma.doctor.findUnique({
-        where: { userId: currentUser.id },
+    if (currentUser.role === UserRole.DOCTOR) {
+      const doctor = await this.prisma.doctor.findFirst({
+        where: {
+          userId: currentUser.id,
+          hospitalId: prescription.hospitalId,
+          deletedAt: null,
+        },
       });
-      if (!doctor || prescription.doctorId !== doctor.id) {
+      if (!doctor) {
+        throw new ForbiddenException('Doctor is not an active staff member of this hospital');
+      }
+      if (prescription.status === PrescriptionStatus.DRAFT && prescription.doctorId !== doctor.id) {
         throw new ForbiddenException(
           'Only the assigned attending doctor can view a draft prescription',
         );

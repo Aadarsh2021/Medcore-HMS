@@ -44,11 +44,11 @@ function BookAppointmentContent() {
       setPatients(pts.items);
       setDoctors(docs);
 
-      if (docs.length > 0 && !doctorId) {
-        setDoctorId(docs[0].id);
+      if (docs.length > 0) {
+        setDoctorId((curr) => curr || docs[0].id);
       }
-      if (pts.items.length > 0 && !patientId) {
-        setPatientId(preselectedPatientId || pts.items[0].id);
+      if (pts.items.length > 0) {
+        setPatientId((curr) => curr || preselectedPatientId || pts.items[0].id);
       }
     }
     loadData();

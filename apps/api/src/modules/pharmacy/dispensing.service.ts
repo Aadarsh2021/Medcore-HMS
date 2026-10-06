@@ -2,10 +2,12 @@ import {
   Injectable,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
   UnprocessableEntityException,
   Logger,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { IdempotencyService } from './idempotency.service';
 import { computeFefoAllocation } from './allocation.engine';
@@ -14,7 +16,7 @@ import {
   PharmacyQueueQueryDto,
   ReturnDispenseItemDto,
 } from './dto';
-import { PrescriptionStatus, StockMovementType } from '@medcore/types';
+import { PrescriptionStatus, StockMovementType, UserRole } from '@medcore/types';
 import { AuditAction } from '@prisma/client';
 
 @Injectable()
@@ -271,6 +273,21 @@ export class DispensingService {
       throw new BadRequestException('At least one item must be supplied for dispensing');
     }
 
+    // Verify dispensing user belongs to active hospital facility and is active
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, hospitalId, isActive: true },
+    });
+    if (!user) {
+      throw new ForbiddenException('User is not an active staff member of this hospital facility');
+    }
+    if (
+      user.role !== UserRole.PHARMACIST &&
+      user.role !== UserRole.HOSPITAL_ADMIN &&
+      user.role !== UserRole.SUPER_ADMIN
+    ) {
+      throw new ForbiddenException('Access denied: User does not have pharmacy dispensing privileges');
+    }
+
     // 3. Execute atomic transaction with strict deterministic lock order
     const result = await this.prisma.raw.$transaction(
       async (tx) => {
@@ -386,15 +403,25 @@ export class DispensingService {
         }
       }
 
-      // Step E: Generate sequential dispense number: DSP-{hospCode}-{year}-{seq6}
+      // Step E: Concurrency-safe hospital-scoped dispense number generation
       const hospital = await tx.hospital.findUnique({
         where: { id: hospitalId },
         select: { code: true },
       });
-      const hospCode = hospital?.code || 'HOSP';
+      const hospCode = (hospital?.code || 'HOSP').toUpperCase();
       const year = now.getFullYear();
-      const count = await tx.prescriptionDispense.count({ where: { hospitalId } });
-      const dispenseNumber = `DSP-${hospCode}-${year}-${String(count + 1).padStart(6, '0')}`;
+      const existingCount = await tx.prescriptionDispense.count({ where: { hospitalId } });
+      const counterId = randomUUID();
+
+      const counterResult = await tx.$queryRaw<Array<{ lastNumber: number }>>`
+        INSERT INTO "DispenseNumberCounter" ("id", "hospitalId", "year", "lastNumber", "updatedAt")
+        VALUES (${counterId}, ${hospitalId}, ${year}, ${existingCount + 1}, NOW())
+        ON CONFLICT ("hospitalId", "year")
+        DO UPDATE SET "lastNumber" = GREATEST("DispenseNumberCounter"."lastNumber" + 1, ${existingCount + 1}), "updatedAt" = NOW()
+        RETURNING "lastNumber";
+      `;
+      const nextSeq = Number(counterResult[0].lastNumber);
+      const dispenseNumber = `DSP-${hospCode}-${year}-${String(nextSeq).padStart(6, '0')}`;
 
       // Create PrescriptionDispense header
       const dispenseRecord = await tx.prescriptionDispense.create({

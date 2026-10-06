@@ -190,14 +190,24 @@ export class BillingController {
   @Post('webhooks/:provider')
   @HttpCode(HttpStatus.OK)
   async handleWebhook(
+    @Req() req: any,
     @Param('provider') provider: string,
     @Headers('stripe-signature') stripeSig: string | undefined,
     @Headers('x-razorpay-signature') rzpSig: string | undefined,
     @Body() body: any,
   ) {
     const prov = provider.toUpperCase();
+    if (prov !== 'STRIPE' && prov !== 'RAZORPAY') {
+      throw new BadRequestException(`Unsupported webhook provider: ${provider}`);
+    }
+
     const signature = prov === 'STRIPE' ? stripeSig : rzpSig;
-    const rawBodyString = typeof body === 'string' ? body : JSON.stringify(body);
+    const rawBodyBuffer = req.rawBody as Buffer | undefined;
+    const rawBodyString = rawBodyBuffer
+      ? rawBodyBuffer.toString('utf-8')
+      : typeof body === 'string'
+        ? body
+        : JSON.stringify(body);
 
     const isValid = this.paymentProviderService.verifyWebhookSignature(
       prov,
@@ -209,16 +219,46 @@ export class BillingController {
       throw new UnauthorizedException('Invalid webhook signature');
     }
 
-    const parsedEvent = this.paymentProviderService.parseWebhook(prov, body);
+    let parsedBody: any;
+    if (typeof body === 'string') {
+      try {
+        parsedBody = JSON.parse(body);
+      } catch {
+        throw new BadRequestException('Malformed webhook payload: invalid JSON');
+      }
+    } else {
+      parsedBody = body;
+    }
+
+    if (!parsedBody || typeof parsedBody !== 'object') {
+      throw new BadRequestException('Malformed webhook payload');
+    }
+
+    const parsedEvent = this.paymentProviderService.parseWebhook(prov, parsedBody);
+    if (!parsedEvent.eventId) {
+      throw new BadRequestException('Malformed webhook event: missing eventId');
+    }
+
     const { isDuplicate, eventRecordId } = await this.paymentProviderService.recordWebhookEvent(
       parsedEvent,
       rawBodyString,
+      parsedEvent.hospitalId,
     );
 
     if (isDuplicate) {
       return { status: 'IGNORED_DUPLICATE', eventId: parsedEvent.eventId };
     }
 
-    return { status: 'RECEIVED', eventId: parsedEvent.eventId };
+    // Authoritative Settlement: transition invoice status and record payment
+    const settlementResult = await this.billingService.processWebhookPayment(
+      parsedEvent,
+      eventRecordId,
+    );
+
+    return {
+      status: 'PROCESSED',
+      eventId: parsedEvent.eventId,
+      ...settlementResult,
+    };
   }
 }

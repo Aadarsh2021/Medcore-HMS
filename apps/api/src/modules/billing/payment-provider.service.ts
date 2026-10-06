@@ -17,6 +17,8 @@ export interface ParsedWebhookEvent {
   eventType: string;
   providerPaymentId?: string;
   providerOrderId?: string;
+  invoiceId?: string;
+  hospitalId?: string;
   amount?: number;
   currency?: string;
   status: 'SUCCEEDED' | 'FAILED' | 'REFUNDED' | 'OTHER';
@@ -148,7 +150,16 @@ export class PaymentProviderService {
     if (prov === 'RAZORPAY') {
       const event = body.event || 'unknown';
       const paymentEntity = body.payload?.payment?.entity;
+      const orderEntity = body.payload?.order?.entity;
       const eventId = body.id || `provider_evt_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
+      const notes = paymentEntity?.notes || orderEntity?.notes || body.notes || {};
+      const invoiceId =
+        notes.invoiceId ||
+        notes.invoice_id ||
+        body.invoiceId ||
+        paymentEntity?.description ||
+        orderEntity?.receipt;
+      const hospitalId = notes.hospitalId || notes.hospital_id || body.hospitalId;
 
       let status: ParsedWebhookEvent['status'] = 'OTHER';
       if (event === 'payment.captured' || event === 'order.paid') {
@@ -164,7 +175,9 @@ export class PaymentProviderService {
         eventId,
         eventType: event,
         providerPaymentId: paymentEntity?.id,
-        providerOrderId: paymentEntity?.order_id,
+        providerOrderId: paymentEntity?.order_id || orderEntity?.id,
+        invoiceId,
+        hospitalId,
         amount: paymentEntity?.amount ? paymentEntity.amount / 100 : undefined,
         currency: paymentEntity?.currency || 'INR',
         status,
@@ -176,6 +189,13 @@ export class PaymentProviderService {
       const eventId = body.id;
       const eventType = body.type;
       const dataObj = body.data?.object;
+      const metadata = dataObj?.metadata || body.metadata || {};
+      const invoiceId =
+        metadata.invoiceId ||
+        metadata.invoice_id ||
+        body.invoiceId ||
+        dataObj?.description;
+      const hospitalId = metadata.hospitalId || metadata.hospital_id || body.hospitalId;
 
       let status: ParsedWebhookEvent['status'] = 'OTHER';
       if (eventType === 'payment_intent.succeeded' || eventType === 'charge.succeeded') {
@@ -191,7 +211,9 @@ export class PaymentProviderService {
         eventId,
         eventType,
         providerPaymentId: dataObj?.id,
-        providerOrderId: dataObj?.metadata?.orderId || dataObj?.payment_intent,
+        providerOrderId: metadata?.orderId || dataObj?.payment_intent,
+        invoiceId,
+        hospitalId,
         amount: dataObj?.amount ? dataObj.amount / 100 : undefined,
         currency: dataObj?.currency ? dataObj.currency.toUpperCase() : 'INR',
         status,
@@ -221,19 +243,31 @@ export class PaymentProviderService {
       return { isDuplicate: true, eventRecordId: existing.id };
     }
 
-    const created = await this.prisma.raw.paymentProviderEvent.create({
-      data: {
-        hospitalId: hospitalId || null,
-        provider: event.provider,
-        eventId: event.eventId,
-        eventType: event.eventType,
-        payloadHash,
-        payload: event.rawPayload,
-        processingStatus: WebhookProcessingStatus.PENDING,
-      },
-    });
+    try {
+      const created = await this.prisma.raw.paymentProviderEvent.create({
+        data: {
+          hospitalId: hospitalId || event.hospitalId || null,
+          provider: event.provider,
+          eventId: event.eventId,
+          eventType: event.eventType,
+          payloadHash,
+          payload: event.rawPayload,
+          processingStatus: WebhookProcessingStatus.PENDING,
+        },
+      });
 
-    return { isDuplicate: false, eventRecordId: created.id };
+      return { isDuplicate: false, eventRecordId: created.id };
+    } catch (error: any) {
+      if (error?.code === 'P2002') {
+        const raceExisting = await this.prisma.raw.paymentProviderEvent.findUnique({
+          where: { eventId: event.eventId },
+        });
+        if (raceExisting) {
+          return { isDuplicate: true, eventRecordId: raceExisting.id };
+        }
+      }
+      throw error;
+    }
   }
 
   /**

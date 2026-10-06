@@ -105,39 +105,52 @@ export class IdempotencyService {
       return;
     }
 
-    const requestHash = this.hashPayload(payload);
-    const serializedBody = typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody);
-    const expiresAt = new Date(Date.now() + ttlHours * 3600 * 1000);
+    // Idempotency record persistence is best-effort bookkeeping.
+    // A connection pool exhaustion or transient DB error after a committed
+    // transaction must never surface as a caller-visible failure — the
+    // primary business operation has already succeeded and the data is committed.
+    try {
+      const requestHash = this.hashPayload(payload);
+      const serializedBody =
+        typeof responseBody === 'string' ? responseBody : JSON.stringify(responseBody);
+      const expiresAt = new Date(Date.now() + ttlHours * 3600 * 1000);
 
-    const existing = await this.prisma.idempotencyRecord.findFirst({
-      where: {
-        hospitalId,
-        idempotencyKey,
-      },
-    });
-
-    if (existing) {
-      await this.prisma.idempotencyRecord.update({
-        where: { id: existing.id },
-        data: {
-          requestHash,
-          responseStatus,
-          responseBody: serializedBody,
-          expiresAt,
-        },
-      });
-    } else {
-      await this.prisma.idempotencyRecord.create({
-        data: {
+      const existing = await this.prisma.idempotencyRecord.findFirst({
+        where: {
           hospitalId,
           idempotencyKey,
-          endpoint,
-          requestHash,
-          responseStatus,
-          responseBody: serializedBody,
-          expiresAt,
         },
       });
+
+      if (existing) {
+        await this.prisma.idempotencyRecord.update({
+          where: { id: existing.id },
+          data: {
+            requestHash,
+            responseStatus,
+            responseBody: serializedBody,
+            expiresAt,
+          },
+        });
+      } else {
+        await this.prisma.idempotencyRecord.create({
+          data: {
+            hospitalId,
+            idempotencyKey,
+            endpoint,
+            requestHash,
+            responseStatus,
+            responseBody: serializedBody,
+            expiresAt,
+          },
+        });
+      }
+    } catch (err: unknown) {
+      // Log but do not rethrow — the committed transaction result stands.
+      this.logger.warn(
+        `Idempotency record save failed for key '${idempotencyKey}' on hospital '${hospitalId}'. ` +
+          `The business operation succeeded. Error: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 }

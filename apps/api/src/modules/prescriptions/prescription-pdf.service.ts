@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const PDFDocument = require('pdfkit');
+import * as PDFKitModule from 'pdfkit';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const PDFDocument: any = (PDFKitModule as any).default || PDFKitModule;
 
 export interface GeneratePdfParams {
   hospital: {

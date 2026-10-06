@@ -7,6 +7,7 @@ import {
 import {
   AllergyResponseData,
   AllergySeverity,
+  AuditAction,
   BloodGroup,
   EncounterListItemData,
   EncounterStatus,
@@ -288,6 +289,7 @@ export class MedicalRecordsService {
     tenantId: string | null,
     patientId: string,
     dto: CreateAllergyDto,
+    currentUser?: { id: string; role: UserRole },
   ): Promise<AllergyResponseData> {
     if (!tenantId) {
       throw new ForbiddenException('Tenant context required');
@@ -305,6 +307,19 @@ export class MedicalRecordsService {
         diagnosedAt: dto.diagnosedAt ? new Date(dto.diagnosedAt) : new Date(),
       },
     });
+
+    if (currentUser?.id) {
+      await this.prisma.auditLog.create({
+        data: {
+          hospitalId: tenantId,
+          userId: currentUser.id,
+          action: AuditAction.CREATE,
+          entityName: 'Allergy',
+          entityId: allergy.id,
+          changesJson: { action: 'ADD_ALLERGY', patientId, allergen: allergy.allergen },
+        },
+      });
+    }
 
     return {
       id: allergy.id,
@@ -325,6 +340,7 @@ export class MedicalRecordsService {
     tenantId: string | null,
     patientId: string,
     dto: CreateMedicationHistoryDto,
+    currentUser?: { id: string; role: UserRole },
   ): Promise<MedicationHistoryResponseData> {
     if (!tenantId) {
       throw new ForbiddenException('Tenant context required');
@@ -346,6 +362,19 @@ export class MedicalRecordsService {
         notes: dto.notes?.trim() || null,
       },
     });
+
+    if (currentUser?.id) {
+      await this.prisma.auditLog.create({
+        data: {
+          hospitalId: tenantId,
+          userId: currentUser.id,
+          action: AuditAction.CREATE,
+          entityName: 'MedicationHistory',
+          entityId: med.id,
+          changesJson: { action: 'ADD_MEDICATION_HISTORY', patientId, medicationName: med.medicationName },
+        },
+      });
+    }
 
     return {
       id: med.id,
@@ -370,6 +399,7 @@ export class MedicalRecordsService {
     tenantId: string | null,
     patientId: string,
     dto: CreateVaccinationDto,
+    currentUser?: { id: string; role: UserRole },
   ): Promise<VaccinationResponseData> {
     if (!tenantId) {
       throw new ForbiddenException('Tenant context required');
@@ -388,6 +418,19 @@ export class MedicalRecordsService {
         notes: dto.notes?.trim() || null,
       },
     });
+
+    if (currentUser?.id) {
+      await this.prisma.auditLog.create({
+        data: {
+          hospitalId: tenantId,
+          userId: currentUser.id,
+          action: AuditAction.CREATE,
+          entityName: 'VaccinationHistory',
+          entityId: vax.id,
+          changesJson: { action: 'ADD_VACCINATION', patientId, vaccineName: vax.vaccineName },
+        },
+      });
+    }
 
     return {
       id: vax.id,
@@ -409,6 +452,7 @@ export class MedicalRecordsService {
     tenantId: string | null,
     patientId: string,
     dto: CreateFamilyHistoryDto,
+    currentUser?: { id: string; role: UserRole },
   ): Promise<FamilyHistoryResponseData> {
     if (!tenantId) {
       throw new ForbiddenException('Tenant context required');
@@ -425,6 +469,19 @@ export class MedicalRecordsService {
         notes: dto.notes?.trim() || null,
       },
     });
+
+    if (currentUser?.id) {
+      await this.prisma.auditLog.create({
+        data: {
+          hospitalId: tenantId,
+          userId: currentUser.id,
+          action: AuditAction.CREATE,
+          entityName: 'FamilyHistory',
+          entityId: fam.id,
+          changesJson: { action: 'ADD_FAMILY_HISTORY', patientId, condition: fam.condition },
+        },
+      });
+    }
 
     return {
       id: fam.id,
@@ -445,9 +502,14 @@ export class MedicalRecordsService {
     patientId: string,
     currentUser: { id: string; role: UserRole },
   ): Promise<void> {
-    // Receptionists cannot view clinical medical records
-    if (currentUser.role === UserRole.RECEPTIONIST) {
-      throw new ForbiddenException('Receptionists are not permitted to access clinical records');
+    // Non-clinical roles cannot view clinical medical records
+    if (
+      currentUser.role === UserRole.RECEPTIONIST ||
+      currentUser.role === UserRole.ACCOUNTANT ||
+      currentUser.role === UserRole.PHARMACIST ||
+      currentUser.role === UserRole.LAB_TECHNICIAN
+    ) {
+      throw new ForbiddenException('Non-clinical staff are not permitted to access clinical records');
     }
 
     // Patients can only access their own record

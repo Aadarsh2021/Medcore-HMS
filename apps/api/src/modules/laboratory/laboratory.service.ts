@@ -25,6 +25,8 @@ import {
   LabPriority,
   LabResultFlag,
   LabSpecimenStatus,
+  NotificationChannel,
+  NotificationStatus,
   UserRole,
 } from '@medcore/types';
 
@@ -88,7 +90,7 @@ export class LaboratoryService {
   async createOrder(hospitalId: string, user: any, dto: CreateLabOrderDto) {
     // A. Validate Patient belongs to active hospital
     const patient = await this.prisma.patient.findFirst({
-      where: { id: dto.patientId, hospitalId },
+      where: { id: dto.patientId, hospitalId, deletedAt: null },
       include: { user: true },
     });
     if (!patient) {
@@ -97,11 +99,16 @@ export class LaboratoryService {
 
     // B. Validate Ordering Doctor belongs to active hospital
     const doctor = await this.prisma.doctor.findFirst({
-      where: { id: dto.doctorId, hospitalId },
+      where: { id: dto.doctorId, hospitalId, deletedAt: null },
       include: { user: true, department: true },
     });
     if (!doctor) {
       throw new BadRequestException('Doctor not found or belongs to another hospital facility');
+    }
+
+    // Prevent doctor identity spoofing: ordering doctor must match authenticated doctor
+    if (user.role === UserRole.DOCTOR && doctor.userId !== user.id) {
+      throw new ForbiddenException('Forbidden: Ordering doctor identity must match authenticated doctor credentials');
     }
 
     // C. Validate Encounter (if provided) belongs to hospital and matches patient
@@ -114,8 +121,12 @@ export class LaboratoryService {
       }
     }
 
-    // D. Validate Tests belong to hospital
+    // D. Validate Tests belong to hospital and no duplicate tests in items
     const testIds = dto.items.map((i) => i.testId);
+    if (new Set(testIds).size !== testIds.length) {
+      throw new BadRequestException('Duplicate tests specified in order items');
+    }
+
     const labTests = await this.prisma.labTest.findMany({
       where: { id: { in: testIds }, hospitalId },
       include: { category: true },
@@ -286,7 +297,10 @@ export class LaboratoryService {
       include: {
         patient: { include: { user: true } },
         doctor: { include: { user: true, department: true } },
-        items: { include: { test: { include: { category: true } } } },
+        items: {
+          include: { test: { include: { category: true } } },
+          orderBy: { createdAt: 'asc' },
+        },
         specimens: true,
         amendments: true,
       },
@@ -324,17 +338,36 @@ export class LaboratoryService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const order = await tx.labOrder.findFirst({
-        where: { id: orderId, hospitalId },
-      });
-      if (!order) {
+      // Pessimistic Row Lock: Prevents concurrent race specimen collections
+      const rows = await tx.$queryRaw<Array<{ id: string; status: string; orderNumber: string }>>`
+        SELECT "id", "status", "orderNumber"
+        FROM "LabOrder"
+        WHERE "id" = ${orderId} AND "hospitalId" = ${hospitalId}
+        FOR UPDATE
+      `;
+      if (!rows.length) {
         throw new NotFoundException(`Laboratory order '${orderId}' not found`);
       }
+      const orderRow = rows[0];
 
       // Exact State Transition Enforcement
-      if (order.status !== LabOrderStatus.ORDERED) {
+      if (orderRow.status !== LabOrderStatus.ORDERED) {
         throw new BadRequestException(
-          `Invalid state transition: Cannot collect specimen for order in '${order.status}' status (must be ORDERED)`,
+          `Invalid state transition: Cannot collect specimen for order in '${orderRow.status}' status (must be ORDERED)`,
+        );
+      }
+
+      // Defensive check for existing active specimen on this order
+      const existingActiveSpecimen = await tx.labSpecimen.findFirst({
+        where: {
+          orderId: orderRow.id,
+          hospitalId,
+          status: { not: LabSpecimenStatus.REJECTED },
+        },
+      });
+      if (existingActiveSpecimen) {
+        throw new ConflictException(
+          `An active specimen '${existingActiveSpecimen.accessionNumber}' already exists for this order`,
         );
       }
 
@@ -346,7 +379,7 @@ export class LaboratoryService {
       const specimen = await tx.labSpecimen.create({
         data: {
           hospitalId,
-          orderId: order.id,
+          orderId: orderRow.id,
           accessionNumber,
           specimenType: dto.specimenType,
           status: LabSpecimenStatus.COLLECTED,
@@ -359,7 +392,7 @@ export class LaboratoryService {
 
       // Update Order Status
       const updatedOrder = await tx.labOrder.update({
-        where: { id: order.id },
+        where: { id: orderRow.id },
         data: {
           status: LabOrderStatus.SAMPLE_COLLECTED,
           specimenType: dto.specimenType,
@@ -383,13 +416,13 @@ export class LaboratoryService {
           userId: user.id,
           action: AuditAction.UPDATE,
           entityName: 'LabOrder',
-          entityId: order.id,
+          entityId: orderRow.id,
           changesJson: {
             action: 'SPECIMEN_COLLECTION',
-            orderNumber: order.orderNumber,
+            orderNumber: orderRow.orderNumber,
             accessionNumber: specimen.accessionNumber,
             specimenType: dto.specimenType,
-            previousStatus: order.status,
+            previousStatus: orderRow.status,
             newStatus: LabOrderStatus.SAMPLE_COLLECTED,
           },
         },
@@ -416,21 +449,25 @@ export class LaboratoryService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const order = await tx.labOrder.findFirst({
-        where: { id: orderId, hospitalId },
-        include: { specimens: true },
-      });
-      if (!order) {
+      // Pessimistic Row Lock
+      const rows = await tx.$queryRaw<Array<{ id: string; status: string; orderNumber: string }>>`
+        SELECT "id", "status", "orderNumber"
+        FROM "LabOrder"
+        WHERE "id" = ${orderId} AND "hospitalId" = ${hospitalId}
+        FOR UPDATE
+      `;
+      if (!rows.length) {
         throw new NotFoundException(`Laboratory order '${orderId}' not found`);
       }
+      const orderRow = rows[0];
 
-      if (order.status === LabOrderStatus.APPROVED || order.status === LabOrderStatus.CANCELLED) {
-        throw new BadRequestException(`Cannot reject specimen for order in terminal status '${order.status}'`);
+      if (orderRow.status === LabOrderStatus.APPROVED || orderRow.status === LabOrderStatus.CANCELLED) {
+        throw new BadRequestException(`Cannot reject specimen for order in terminal status '${orderRow.status}'`);
       }
 
       // Mark all specimens REJECTED
       await tx.labSpecimen.updateMany({
-        where: { orderId: order.id, hospitalId },
+        where: { orderId: orderRow.id, hospitalId },
         data: {
           status: LabSpecimenStatus.REJECTED,
           rejectionReason: dto.rejectionReason,
@@ -441,7 +478,7 @@ export class LaboratoryService {
 
       // Advance Order to REJECTED terminal state
       const updatedOrder = await tx.labOrder.update({
-        where: { id: order.id },
+        where: { id: orderRow.id },
         data: {
           status: LabOrderStatus.REJECTED,
           cancellationReason: `Specimen Rejected: ${dto.rejectionReason}`,
@@ -462,10 +499,10 @@ export class LaboratoryService {
           userId: user.id,
           action: AuditAction.UPDATE,
           entityName: 'LabOrder',
-          entityId: order.id,
+          entityId: orderRow.id,
           changesJson: {
             action: 'SPECIMEN_REJECTION',
-            orderNumber: order.orderNumber,
+            orderNumber: orderRow.orderNumber,
             reason: dto.rejectionReason,
             newStatus: LabOrderStatus.REJECTED,
           },
@@ -489,21 +526,26 @@ export class LaboratoryService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const order = await tx.labOrder.findFirst({
-        where: { id: orderId, hospitalId },
-      });
-      if (!order) {
+      // Pessimistic Row Lock
+      const rows = await tx.$queryRaw<Array<{ id: string; status: string; orderNumber: string }>>`
+        SELECT "id", "status", "orderNumber"
+        FROM "LabOrder"
+        WHERE "id" = ${orderId} AND "hospitalId" = ${hospitalId}
+        FOR UPDATE
+      `;
+      if (!rows.length) {
         throw new NotFoundException(`Laboratory order '${orderId}' not found`);
       }
+      const orderRow = rows[0];
 
-      if (order.status !== LabOrderStatus.SAMPLE_COLLECTED) {
+      if (orderRow.status !== LabOrderStatus.SAMPLE_COLLECTED) {
         throw new BadRequestException(
-          `Invalid state transition: Cannot begin processing for order in '${order.status}' status (must be SAMPLE_COLLECTED)`,
+          `Invalid state transition: Cannot begin processing for order in '${orderRow.status}' status (must be SAMPLE_COLLECTED)`,
         );
       }
 
       const updatedOrder = await tx.labOrder.update({
-        where: { id: order.id },
+        where: { id: orderRow.id },
         data: {
           status: LabOrderStatus.PROCESSING,
           processedAt: new Date(),
@@ -518,7 +560,7 @@ export class LaboratoryService {
       });
 
       await tx.labSpecimen.updateMany({
-        where: { orderId: order.id, hospitalId },
+        where: { orderId: orderRow.id, hospitalId },
         data: {
           status: LabSpecimenStatus.PROCESSING,
           processorId: user.id,
@@ -532,11 +574,11 @@ export class LaboratoryService {
           userId: user.id,
           action: AuditAction.UPDATE,
           entityName: 'LabOrder',
-          entityId: order.id,
+          entityId: orderRow.id,
           changesJson: {
             action: 'START_PROCESSING',
-            orderNumber: order.orderNumber,
-            previousStatus: order.status,
+            orderNumber: orderRow.orderNumber,
+            previousStatus: orderRow.status,
             newStatus: LabOrderStatus.PROCESSING,
           },
         },
@@ -559,26 +601,38 @@ export class LaboratoryService {
     }
 
     return this.prisma.$transaction(async (tx) => {
-      const order = await tx.labOrder.findFirst({
-        where: { id: orderId, hospitalId },
-        include: { items: { include: { test: true } } },
-      });
-      if (!order) {
+      // Pessimistic Row Lock: Prevents concurrent race with approval or other entry
+      const rows = await tx.$queryRaw<Array<{ id: string; status: string; orderNumber: string; patientId: string; doctorId: string }>>`
+        SELECT "id", "status", "orderNumber", "patientId", "doctorId"
+        FROM "LabOrder"
+        WHERE "id" = ${orderId} AND "hospitalId" = ${hospitalId}
+        FOR UPDATE
+      `;
+      if (!rows.length) {
         throw new NotFoundException(`Laboratory order '${orderId}' not found`);
       }
+      const orderRow = rows[0];
 
-      if (order.status === LabOrderStatus.APPROVED) {
+      if (orderRow.status === LabOrderStatus.APPROVED) {
         throw new BadRequestException('Results are finalized and immutable. Corrections require formal clinical amendment.');
       }
-      if (order.status !== LabOrderStatus.PROCESSING && order.status !== LabOrderStatus.RESULTS_ENTERED) {
+      if (orderRow.status !== LabOrderStatus.PROCESSING && orderRow.status !== LabOrderStatus.RESULTS_ENTERED) {
         throw new BadRequestException(
-          `Cannot enter results: Order must be in PROCESSING or RESULTS_ENTERED status (current: '${order.status}')`,
+          `Cannot enter results: Order must be in PROCESSING or RESULTS_ENTERED status (current: '${orderRow.status}')`,
         );
       }
 
+      const items = await tx.labOrderItem.findMany({
+        where: { orderId: orderRow.id },
+        include: { test: true },
+      });
+
+      let hasCritical = false;
+      const criticalDetails: Array<{ testCode: string; testName: string; value: string; unit?: string | null }> = [];
+
       // Evaluate and update each item
       for (const res of dto.results) {
-        const item = order.items.find((i) => i.id === res.orderItemId || i.test.code === res.code);
+        const item = items.find((i) => i.id === res.orderItemId || i.test.code === res.code);
         if (!item) continue;
 
         // Authoritative Range & Critical Panic Evaluation
@@ -589,6 +643,16 @@ export class LaboratoryService {
           criticalLow: item.test.criticalLow ? Number(item.test.criticalLow) : null,
           criticalHigh: item.test.criticalHigh ? Number(item.test.criticalHigh) : null,
         });
+
+        if (evaluated.isCritical) {
+          hasCritical = true;
+          criticalDetails.push({
+            testCode: item.test.code,
+            testName: item.test.name,
+            value: res.resultValue,
+            unit: res.unit || item.resultUnit || item.test.unit,
+          });
+        }
 
         await tx.labOrderItem.update({
           where: { id: item.id },
@@ -605,9 +669,36 @@ export class LaboratoryService {
         });
       }
 
+      // If critical panic values were evaluated, create immediate in-app clinical alert
+      if (hasCritical) {
+        const doctor = await tx.doctor.findUnique({
+          where: { id: orderRow.doctorId },
+          select: { userId: true },
+        });
+        if (doctor?.userId) {
+          const criticalSummary = criticalDetails.map((c) => `${c.testCode}: ${c.value}${c.unit ? ' ' + c.unit : ''}`).join(', ');
+          await tx.notification.create({
+            data: {
+              hospitalId,
+              userId: doctor.userId,
+              title: 'CRITICAL LAB ALERT: Immediate Attention Required',
+              message: `Critical panic laboratory values recorded for Order ${orderRow.orderNumber} (${criticalSummary}). Immediate clinical evaluation required.`,
+              channel: NotificationChannel.IN_APP,
+              status: NotificationStatus.PENDING,
+              metadataJson: {
+                orderId: orderRow.id,
+                orderNumber: orderRow.orderNumber,
+                patientId: orderRow.patientId,
+                criticalDetails,
+              },
+            },
+          });
+        }
+      }
+
       // Advance Order to RESULTS_ENTERED
       const updatedOrder = await tx.labOrder.update({
-        where: { id: order.id },
+        where: { id: orderRow.id },
         data: {
           status: LabOrderStatus.RESULTS_ENTERED,
         },
@@ -627,11 +718,12 @@ export class LaboratoryService {
           userId: user.id,
           action: AuditAction.UPDATE,
           entityName: 'LabOrder',
-          entityId: order.id,
+          entityId: orderRow.id,
           changesJson: {
             action: 'ENTER_RESULTS',
-            orderNumber: order.orderNumber,
+            orderNumber: orderRow.orderNumber,
             measuredCount: dto.results.length,
+            hasCriticalResult: hasCritical,
             newStatus: LabOrderStatus.RESULTS_ENTERED,
           },
         },
@@ -650,6 +742,16 @@ export class LaboratoryService {
       throw new ForbiddenException(
         'Access denied: Only authorized Physicians or Pathologists may certify and approve diagnostic reports',
       );
+    }
+
+    // Verify certifying doctor belongs to active hospital facility
+    if (user.role === UserRole.DOCTOR) {
+      const activeDoctor = await this.prisma.doctor.findFirst({
+        where: { userId: user.id, hospitalId, deletedAt: null },
+      });
+      if (!activeDoctor) {
+        throw new ForbiddenException('Access denied: Certifying doctor is not an active staff member of this hospital facility');
+      }
     }
 
     return this.prisma.$transaction(async (tx) => {
@@ -745,22 +847,39 @@ export class LaboratoryService {
       throw new BadRequestException('Mandatory clinical reason required for post-approval result amendment');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const order = await tx.labOrder.findFirst({
-        where: { id: orderId, hospitalId },
-        include: { items: { include: { test: true } } },
+    // Verify amending doctor belongs to active hospital facility
+    if (user.role === UserRole.DOCTOR) {
+      const activeDoctor = await this.prisma.doctor.findFirst({
+        where: { userId: user.id, hospitalId, deletedAt: null },
       });
-      if (!order) {
+      if (!activeDoctor) {
+        throw new ForbiddenException('Access denied: Certifying doctor is not an active staff member of this hospital facility');
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // Pessimistic Row Lock
+      const rows = await tx.$queryRaw<Array<{ id: string; status: string; orderNumber: string; patientId: string; doctorId: string }>>`
+        SELECT "id", "status", "orderNumber", "patientId", "doctorId"
+        FROM "LabOrder"
+        WHERE "id" = ${orderId} AND "hospitalId" = ${hospitalId}
+        FOR UPDATE
+      `;
+      if (!rows.length) {
         throw new NotFoundException(`Laboratory order '${orderId}' not found`);
       }
+      const orderRow = rows[0];
 
-      if (order.status !== LabOrderStatus.APPROVED) {
+      if (orderRow.status !== LabOrderStatus.APPROVED) {
         throw new BadRequestException(
-          `Amendment is only permitted on finalized, APPROVED reports (current: '${order.status}')`,
+          `Amendment is only permitted on finalized, APPROVED reports (current: '${orderRow.status}')`,
         );
       }
 
-      const item = order.items.find((i) => i.id === dto.orderItemId);
+      const item = await tx.labOrderItem.findFirst({
+        where: { id: dto.orderItemId, orderId: orderRow.id },
+        include: { test: true },
+      });
       if (!item) {
         throw new NotFoundException(`Lab test item '${dto.orderItemId}' not found on order`);
       }
@@ -783,7 +902,7 @@ export class LaboratoryService {
       await tx.labResultAmendment.create({
         data: {
           hospitalId,
-          orderId: order.id,
+          orderId: orderRow.id,
           orderItemId: item.id,
           previousValue: prevValue,
           previousFlag: prevFlag,
@@ -807,9 +926,38 @@ export class LaboratoryService {
         },
       });
 
+      // If amended value is critical, create immediate in-app clinical alert
+      if (evaluated.isCritical) {
+        const doctor = await tx.doctor.findUnique({
+          where: { id: orderRow.doctorId },
+          select: { userId: true },
+        });
+        if (doctor?.userId) {
+          await tx.notification.create({
+            data: {
+              hospitalId,
+              userId: doctor.userId,
+              title: 'CRITICAL LAB ALERT: Amended Result Immediate Attention Required',
+              message: `Critical panic laboratory value amended for Order ${orderRow.orderNumber} (${item.test.code}: ${dto.newValue}). Reason: ${dto.reason}`,
+              channel: NotificationChannel.IN_APP,
+              status: NotificationStatus.PENDING,
+              metadataJson: {
+                orderId: orderRow.id,
+                orderNumber: orderRow.orderNumber,
+                patientId: orderRow.patientId,
+                orderItemId: item.id,
+                testCode: item.test.code,
+                value: dto.newValue,
+                reason: dto.reason,
+              },
+            },
+          });
+        }
+      }
+
       // Re-fetch complete order with amendments
       const updatedOrder = await tx.labOrder.findFirst({
-        where: { id: order.id },
+        where: { id: orderRow.id },
         include: {
           patient: { include: { user: true } },
           doctor: { include: { user: true } },
@@ -826,13 +974,14 @@ export class LaboratoryService {
           userId: user.id,
           action: AuditAction.UPDATE,
           entityName: 'LabResultAmendment',
-          entityId: order.id,
+          entityId: orderRow.id,
           changesJson: {
             action: 'AMEND_RESULT',
-            orderNumber: order.orderNumber,
+            orderNumber: orderRow.orderNumber,
             orderItemId: item.id,
             reason: dto.reason,
             amendedBy: amendedByName,
+            isCritical: evaluated.isCritical,
           },
         },
       });
@@ -857,26 +1006,41 @@ export class LaboratoryService {
       throw new BadRequestException('Cancellation reason is required');
     }
 
-    return this.prisma.$transaction(async (tx) => {
-      const order = await tx.labOrder.findFirst({
-        where: { id: orderId, hospitalId },
+    // Verify cancelling doctor belongs to active hospital facility
+    if (user.role === UserRole.DOCTOR) {
+      const activeDoctor = await this.prisma.doctor.findFirst({
+        where: { userId: user.id, hospitalId, deletedAt: null },
       });
-      if (!order) {
+      if (!activeDoctor) {
+        throw new ForbiddenException('Access denied: Doctor is not an active staff member of this hospital facility');
+      }
+    }
+
+    return this.prisma.$transaction(async (tx) => {
+      // Pessimistic Row Lock
+      const rows = await tx.$queryRaw<Array<{ id: string; status: string; orderNumber: string }>>`
+        SELECT "id", "status", "orderNumber"
+        FROM "LabOrder"
+        WHERE "id" = ${orderId} AND "hospitalId" = ${hospitalId}
+        FOR UPDATE
+      `;
+      if (!rows.length) {
         throw new NotFoundException(`Laboratory order '${orderId}' not found`);
       }
+      const orderRow = rows[0];
 
-      if (order.status === LabOrderStatus.APPROVED) {
+      if (orderRow.status === LabOrderStatus.APPROVED) {
         throw new BadRequestException('Cannot cancel order: Diagnostic report has already been certified and approved');
       }
-      if (order.status === LabOrderStatus.PROCESSING) {
+      if (orderRow.status === LabOrderStatus.PROCESSING) {
         throw new BadRequestException('Cannot cancel order: Laboratory specimen is actively undergoing analyzer processing');
       }
-      if (order.status === LabOrderStatus.CANCELLED) {
+      if (orderRow.status === LabOrderStatus.CANCELLED) {
         throw new BadRequestException('Order is already cancelled');
       }
 
       const cancelledOrder = await tx.labOrder.update({
-        where: { id: order.id },
+        where: { id: orderRow.id },
         data: {
           status: LabOrderStatus.CANCELLED,
           cancelledById: user.id,
@@ -899,10 +1063,10 @@ export class LaboratoryService {
           userId: user.id,
           action: AuditAction.UPDATE,
           entityName: 'LabOrder',
-          entityId: order.id,
+          entityId: orderRow.id,
           changesJson: {
             action: 'CANCEL_ORDER',
-            orderNumber: order.orderNumber,
+            orderNumber: orderRow.orderNumber,
             reason: dto.reason,
             newStatus: LabOrderStatus.CANCELLED,
           },
@@ -947,7 +1111,14 @@ export class LaboratoryService {
       specimenType: order.specimenType || 'Specimen',
       priority: order.priority,
       clinicalNotes: order.clinicalNotes || undefined,
-      tests: (order.items || []).map((i: any) => ({
+      tests: [...(order.items || [])]
+        .sort((a: any, b: any) => {
+          const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+          const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+          if (aTime !== bTime) return aTime - bTime;
+          return (a.id || '').localeCompare(b.id || '');
+        })
+        .map((i: any) => ({
         id: i.id,
         testId: i.testId,
         code: i.test?.code || '',

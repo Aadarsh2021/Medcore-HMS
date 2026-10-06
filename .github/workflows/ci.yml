@@ -2,14 +2,56 @@ name: MedCore HMS — Continuous Integration (CI)
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 jobs:
   validate:
-    name: Lint, Typecheck & Production Build
+    name: Full CI Pipeline (Postgres, Redis, Lint, Typecheck, Tests & Build)
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+          POSTGRES_DB: medcore_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      DATABASE_URL: "postgresql://postgres:postgrespassword@localhost:5432/medcore_test?schema=public"
+      DIRECT_URL: "postgresql://postgres:postgrespassword@localhost:5432/medcore_test?schema=public"
+      REDIS_HOST: "localhost"
+      REDIS_PORT: 6379
+      REDIS_URL: "redis://localhost:6379"
+      NODE_ENV: "test"
+      JWT_ACCESS_SECRET: "ci_jwt_access_super_secret_test_key_32_bytes_min"
+      JWT_REFRESH_SECRET: "ci_jwt_refresh_super_secret_test_key_32_bytes_min"
+      COOKIE_SECRET: "ci_cookie_secret_key_32_bytes_minimum"
+      NEXT_PUBLIC_API_URL: "http://localhost:3001/api"
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000"
+      NEXT_TELEMETRY_DISABLED: 1
+      S3_BUCKET: "medcore-ci-test-bucket"
+      S3_REGION: "ap-south-1"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,11 +72,26 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm exec prisma generate --schema=prisma/schema.prisma
 
+      - name: Push Schema to Test Database
+        run: pnpm --filter @medcore/api db:push
+
       - name: Build Shared Types Package
         run: pnpm --filter @medcore/types build
+
+      - name: Run Workspace Linting
+        run: pnpm lint
+
+      - name: Typecheck NestJS API
+        run: pnpm --filter @medcore/api exec tsc --noEmit
+
+      - name: Typecheck Next.js Frontend
+        run: pnpm --filter @medcore/web exec tsc --noEmit
+
+      - name: Execute Automated Test Suites
+        run: pnpm --filter @medcore/api test -- --runInBand
 
       - name: Build NestJS API (@medcore/api)
         run: pnpm --filter @medcore/api build
 
-      - name: Build Next.js 15 Frontend (@medcore/web)
+      - name: Build Next.js Frontend (@medcore/web)
         run: pnpm --filter @medcore/web build

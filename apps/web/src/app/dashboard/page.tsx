@@ -39,10 +39,12 @@ import {
 } from 'lucide-react';
 import { appointmentsService, AppointmentRecord } from '../../lib/api/appointments.service';
 import { UserRole } from '@medcore/types';
+import { useRealtime } from '../../hooks/useRealtime';
 
 export default function DashboardPage() {
   const router = useRouter();
   const { user } = useAuthStore();
+  const { isConnected, lastCriticalAlert, lastBedUpdate, clearCriticalAlert } = useRealtime();
   const [appointments, setAppointments] = useState<AppointmentRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -95,6 +97,10 @@ export default function DashboardPage() {
             <span className="font-semibold text-slate-200">Workspace View:</span>
             <span className="font-mono text-teal-300 font-bold uppercase">{activeWorkspaceRole.replace('_', ' ')}</span>
             <span className="text-slate-400 hidden sm:inline">&middot; Switch workspace to inspect specialized role dashboards</span>
+            <span className="flex items-center gap-1.5 ml-2 pl-2 border-l border-slate-700">
+              <span className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-slate-500'}`} />
+              <span className="text-[10px] text-slate-400">{isConnected ? 'Realtime Connected' : 'Realtime Sync'}</span>
+            </span>
           </div>
           <div className="flex flex-wrap items-center gap-1">
             {ALL_ROLES.map(({ role, label }) => (
@@ -112,6 +118,43 @@ export default function DashboardPage() {
             ))}
           </div>
         </div>
+
+        {/* Realtime Critical Alert Broadcast Banner */}
+        {lastCriticalAlert && (
+          <div className="p-4 bg-red-600 text-white rounded-xl flex items-center justify-between shadow-lg animate-pulse">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="w-6 h-6 text-yellow-300" />
+              <div>
+                <div className="font-bold text-sm tracking-wide uppercase">Critical Lab Alert Received (Realtime Gateway)</div>
+                <div className="text-xs text-red-100">
+                  Test: <strong>{lastCriticalAlert.testName}</strong> &middot; Value: <strong>{lastCriticalAlert.value}</strong>
+                  {lastCriticalAlert.referenceRange && ` (Ref: ${lastCriticalAlert.referenceRange})`}
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={clearCriticalAlert}
+              className="px-3 py-1 bg-white/20 hover:bg-white/30 text-white rounded-lg text-xs font-semibold"
+            >
+              Acknowledge
+            </button>
+          </div>
+        )}
+
+        {/* Realtime Live Bed Status Toast Notification */}
+        {lastBedUpdate && (
+          <div className="p-3 bg-emerald-900/90 border border-emerald-500/50 text-white rounded-xl flex items-center justify-between text-xs shadow-md">
+            <div className="flex items-center gap-2">
+              <Activity className="w-4 h-4 text-emerald-400" />
+              <span>
+                <strong>Live Bed Update:</strong> Bed #{lastBedUpdate.bedNumber} is now{' '}
+                <span className="font-bold uppercase text-emerald-300">{lastBedUpdate.status}</span>
+                {lastBedUpdate.patientName ? ` (Patient: ${lastBedUpdate.patientName})` : ''}
+              </span>
+            </div>
+            <span className="text-[10px] text-emerald-300 font-mono">Live WebSocket Sync</span>
+          </div>
+        )}
 
         {/* ========================================================================= */}
         {/* 1. SUPER ADMIN WORKSPACE */}
@@ -403,7 +446,7 @@ export default function DashboardPage() {
                     <div>
                       <CardTitle className="text-sm flex items-center gap-2">
                         <Clock className="w-4 h-4 text-teal-600" />
-                        Today's Outpatient Consultation Queue
+                        Today&apos;s Outpatient Consultation Queue
                       </CardTitle>
                       <CardDescription>Patients waiting or currently undergoing consultation</CardDescription>
                     </div>

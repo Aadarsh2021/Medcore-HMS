@@ -32,6 +32,12 @@ export const DIRECT_TENANT_MODELS = [
   'Refund',
   'InvoiceNumberCounter',
   'PaymentNumberCounter',
+  'DispenseNumberCounter',
+  'StockReceiptNumberCounter',
+  'Room',
+  'Bed',
+  'BedAssignment',
+  'Notification',
 ] as const;
 
 /**

@@ -136,3 +136,24 @@ export async function apiClient<T = any>(
     throw new ApiError(0, err.message || 'Network connection failed. Backend service may be offline.', err);
   }
 }
+
+apiClient.get = <T = any>(endpoint: string, options?: ApiRequestOptions): Promise<ApiResponse<T>> =>
+  apiClient<T>(endpoint, { ...options, method: 'GET' });
+
+apiClient.post = <T = any>(endpoint: string, body?: any, options?: ApiRequestOptions): Promise<ApiResponse<T>> =>
+  apiClient<T>(endpoint, {
+    ...options,
+    method: 'POST',
+    body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
+  });
+
+apiClient.put = <T = any>(endpoint: string, body?: any, options?: ApiRequestOptions): Promise<ApiResponse<T>> =>
+  apiClient<T>(endpoint, {
+    ...options,
+    method: 'PUT',
+    body: body instanceof FormData ? body : body ? JSON.stringify(body) : undefined,
+  });
+
+apiClient.delete = <T = any>(endpoint: string, options?: ApiRequestOptions): Promise<ApiResponse<T>> =>
+  apiClient<T>(endpoint, { ...options, method: 'DELETE' });
+

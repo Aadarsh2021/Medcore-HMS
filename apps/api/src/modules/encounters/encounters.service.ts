@@ -78,6 +78,16 @@ export class EncountersService {
       throw new ForbiddenException('Only the assigned doctor may start this clinical encounter');
     }
 
+    // Inactive patient check
+    if (appointment.patient.deletedAt) {
+      throw new NotFoundException('Patient record is inactive or soft-deleted');
+    }
+
+    // Cross-tenant entity check
+    if (appointment.patient.hospitalId !== tenantId || appointment.doctor.hospitalId !== tenantId) {
+      throw new ForbiddenException('Cross-tenant entity mismatch in appointment');
+    }
+
     // Appointment status validation: Cancelled or No-Show cannot have encounters
     if (
       appointment.status === AppointmentStatus.CANCELLED ||
@@ -114,71 +124,101 @@ export class EncountersService {
     }
 
     // Atomically create encounter, draft medical record, and transition appointment
-    const createdEncounter = await this.prisma.$transaction(async (tx) => {
-      const startedAt = new Date();
+    let createdEncounter: any;
+    try {
+      createdEncounter = await this.prisma.$transaction(async (tx) => {
+        const startedAt = new Date();
 
-      // Create initial draft MedicalRecord nested within PatientEncounter creation
-      const chiefComplaint = appointment.reason?.trim() || 'General Consultation';
-      const encounter = await tx.patientEncounter.create({
-        data: {
-          hospitalId: tenantId,
-          appointmentId: appointment.id,
-          patientId: appointment.patientId,
-          doctorId: doctor.id,
-          status: EncounterStatus.IN_PROGRESS,
-          startedAt,
-          medicalRecord: {
-            create: {
-              hospitalId: tenantId,
-              patientId: appointment.patientId,
-              doctorId: doctor.id,
-              chiefComplaint,
-              clinicalNotes: appointment.notes || null,
-            },
-          },
-        },
-      });
-
-      // Transition appointment to IN_PROGRESS if not already
-      if (appointment.status !== AppointmentStatus.IN_PROGRESS) {
-        await tx.appointment.update({
-          where: { id: appointment.id },
-          data: { status: AppointmentStatus.IN_PROGRESS },
-        });
-      }
-
-      // Record operational audit event
-      await tx.auditLog.create({
-        data: {
-          hospitalId: tenantId,
-          userId: currentUser.id,
-          action: AuditAction.CREATE,
-          entityName: 'PatientEncounter',
-          entityId: encounter.id,
-          changesJson: { action: 'START_ENCOUNTER', appointmentId: appointment.id },
-        },
-      });
-
-      const record = await tx.patientEncounter.findFirst({
-        where: { id: encounter.id },
-        include: {
-          appointment: true,
-          patient: { include: { user: true } },
-          doctor: { include: { user: true } },
-          medicalRecord: {
-            include: {
-              vitals: true,
-              diagnoses: true,
-              attachments: true,
-              amendments: {
-                include: { amendedBy: { include: { user: true } } },
+        // Create initial draft MedicalRecord nested within PatientEncounter creation
+        const chiefComplaint = appointment.reason?.trim() || 'General Consultation';
+        const encounter = await tx.patientEncounter.create({
+          data: {
+            hospitalId: tenantId,
+            appointmentId: appointment.id,
+            patientId: appointment.patientId,
+            doctorId: doctor.id,
+            status: EncounterStatus.IN_PROGRESS,
+            startedAt,
+            medicalRecord: {
+              create: {
+                hospitalId: tenantId,
+                patientId: appointment.patientId,
+                doctorId: doctor.id,
+                chiefComplaint,
+                clinicalNotes: appointment.notes || null,
               },
             },
           },
-        },
+        });
+
+        // Transition appointment to IN_PROGRESS if not already
+        if (appointment.status !== AppointmentStatus.IN_PROGRESS) {
+          await tx.appointment.update({
+            where: { id: appointment.id },
+            data: { status: AppointmentStatus.IN_PROGRESS },
+          });
+        }
+
+        // Record operational audit event
+        await tx.auditLog.create({
+          data: {
+            hospitalId: tenantId,
+            userId: currentUser.id,
+            action: AuditAction.CREATE,
+            entityName: 'PatientEncounter',
+            entityId: encounter.id,
+            changesJson: { action: 'START_ENCOUNTER', appointmentId: appointment.id },
+          },
+        });
+
+        const record = await tx.patientEncounter.findFirst({
+          where: { id: encounter.id },
+          include: {
+            appointment: true,
+            patient: { include: { user: true } },
+            doctor: { include: { user: true } },
+            medicalRecord: {
+              include: {
+                vitals: true,
+                diagnoses: true,
+                attachments: true,
+                amendments: {
+                  include: { amendedBy: { include: { user: true } } },
+                },
+              },
+            },
+          },
+        });
+        return record!;
       });
-      return record!;
-    });
+    } catch (err: any) {
+      // Concurrency race catch: if another request simultaneously created the encounter
+      if (err?.code === 'P2002') {
+        const existing = await this.prisma.patientEncounter.findUnique({
+          where: { appointmentId },
+          include: {
+            appointment: true,
+            patient: { include: { user: true } },
+            doctor: { include: { user: true } },
+            medicalRecord: {
+              include: {
+                vitals: { orderBy: { recordedAt: 'asc' } },
+                diagnoses: { orderBy: { createdAt: 'asc' } },
+                attachments: { orderBy: { uploadedAt: 'asc' } },
+                amendments: {
+                  orderBy: { amendmentNumber: 'asc' },
+                  include: { amendedBy: { include: { user: true } } },
+                },
+              },
+            },
+          },
+        });
+        if (existing) {
+          return this.formatEncounterResponse(existing);
+        }
+      }
+      throw err;
+    }
 
     return this.formatEncounterResponse(createdEncounter);
   }
@@ -294,6 +334,25 @@ export class EncountersService {
       },
     });
 
+    // Record operational audit
+    await this.prisma.auditLog.create({
+      data: {
+        hospitalId: tenantId,
+        userId: currentUser.id,
+        action: AuditAction.CREATE,
+        entityName: 'Vital',
+        entityId: vital.id,
+        changesJson: {
+          action: 'RECORD_VITALS',
+          encounterId,
+          recordId: vital.recordId,
+          bpSystolic: vital.bpSystolic,
+          bpDiastolic: vital.bpDiastolic,
+          heartRate: vital.heartRate,
+        },
+      },
+    });
+
     return {
       id: vital.id,
       recordId: vital.recordId,
@@ -358,6 +417,24 @@ export class EncountersService {
       },
     });
 
+    // Record operational audit
+    await this.prisma.auditLog.create({
+      data: {
+        hospitalId: tenantId,
+        userId: currentUser.id,
+        action: AuditAction.CREATE,
+        entityName: 'Diagnosis',
+        entityId: diagnosis.id,
+        changesJson: {
+          action: 'ADD_DIAGNOSIS',
+          encounterId,
+          code: diagnosis.code,
+          type: diagnosis.type,
+          isPrimary: diagnosis.isPrimary,
+        },
+      },
+    });
+
     return {
       id: diagnosis.id,
       recordId: diagnosis.recordId,
@@ -414,6 +491,22 @@ export class EncountersService {
         clinicalNotes: dto.clinicalNotes !== undefined ? dto.clinicalNotes?.trim() : undefined,
         treatmentPlan: dto.treatmentPlan !== undefined ? dto.treatmentPlan?.trim() : undefined,
         followUpDate: dto.followUpDate ? new Date(dto.followUpDate) : undefined,
+      },
+    });
+
+    // Record operational audit
+    await this.prisma.auditLog.create({
+      data: {
+        hospitalId: tenantId,
+        userId: currentUser.id,
+        action: AuditAction.UPDATE,
+        entityName: 'MedicalRecord',
+        entityId: updatedRecord.id,
+        changesJson: {
+          action: 'UPDATE_CLINICAL_NOTES',
+          encounterId,
+          updatedFields: Object.keys(dto),
+        },
       },
     });
 
@@ -477,6 +570,23 @@ export class EncountersService {
           fileUrl: uploadResult.objectKey, // Store object key as canonical reference
           fileType: uploadResult.fileType,
           fileSize: uploadResult.fileSize,
+        },
+      });
+
+      // Record operational audit
+      await this.prisma.auditLog.create({
+        data: {
+          hospitalId: tenantId,
+          userId: currentUser.id,
+          action: AuditAction.CREATE,
+          entityName: 'Attachment',
+          entityId: attachment.id,
+          changesJson: {
+            action: 'UPLOAD_ATTACHMENT',
+            encounterId,
+            fileName: attachment.fileName,
+            fileType: attachment.fileType,
+          },
         },
       });
 
@@ -574,7 +684,7 @@ export class EncountersService {
       throw new NotFoundException(`Encounter with ID '${encounterId}' not found`);
     }
 
-    // Status invariant
+    // Status invariant check before starting transaction
     if (encounter.status !== EncounterStatus.IN_PROGRESS) {
       throw new BadRequestException(
         `Cannot complete encounter in '${encounter.status}' status. Only IN_PROGRESS encounters can be completed`,
@@ -608,8 +718,21 @@ export class EncountersService {
 
     const completedAt = new Date();
 
-    // Atomic completion transaction
+    // Atomic completion transaction with row-level locking
     await this.prisma.$transaction(async (tx) => {
+      // Row lock encounter to prevent concurrent completions
+      const lockedEncounters: Array<{ id: string; status: string }> = await tx.$queryRaw`
+        SELECT id, status FROM "PatientEncounter"
+        WHERE id = ${encounter.id} AND "hospitalId" = ${tenantId}
+        FOR UPDATE
+      `;
+
+      if (!lockedEncounters[0] || lockedEncounters[0].status !== EncounterStatus.IN_PROGRESS) {
+        throw new BadRequestException(
+          `Cannot complete encounter in '${lockedEncounters[0]?.status || 'UNKNOWN'}' status. Only IN_PROGRESS encounters can be completed`,
+        );
+      }
+
       // Complete encounter
       await tx.patientEncounter.update({
         where: { id: encounter.id },
@@ -661,7 +784,7 @@ export class EncountersService {
     const encounter = await this.prisma.patientEncounter.findFirst({
       where: { id: encounterId, hospitalId: tenantId },
       include: {
-        medicalRecord: { include: { amendments: true } },
+        medicalRecord: true,
       },
     });
 
@@ -684,36 +807,55 @@ export class EncountersService {
       throw new ForbiddenException('Only the assigned doctor may submit an amendment');
     }
 
-    const nextAmendmentNumber = encounter.medicalRecord.amendments.length + 1;
+    // Execute within transaction with row lock to serialize concurrent amendments
+    const amendment = await this.prisma.$transaction(async (tx) => {
+      // Row lock on MedicalRecord to serialize concurrent amendments
+      await tx.$queryRaw`
+        SELECT id FROM "MedicalRecord"
+        WHERE id = ${encounter.medicalRecord.id}
+        FOR UPDATE
+      `;
 
-    // Create amendment record WITHOUT modifying MedicalRecord base row
-    const amendment = await this.prisma.medicalRecordAmendment.create({
-      data: {
-        recordId: encounter.medicalRecord.id,
-        amendedById: doctor.id,
-        amendmentNumber: nextAmendmentNumber,
-        amendmentType: dto.amendmentType || AmendmentType.ADDENDUM,
-        section: dto.section || AmendmentSection.CLINICAL_NOTES,
-        reason: dto.reason.trim(),
-        content: dto.content.trim(),
-      },
-      include: { amendedBy: { include: { user: true } } },
-    });
+      // Monotonically allocate next amendment number within lock
+      const maxAgg: Array<{ max_num: number | null }> = await tx.$queryRaw`
+        SELECT MAX("amendmentNumber") as max_num
+        FROM "MedicalRecordAmendment"
+        WHERE "recordId" = ${encounter.medicalRecord.id}
+      `;
+      const currentMax = maxAgg[0]?.max_num ?? 0;
+      const nextAmendmentNumber = currentMax + 1;
 
-    // Record operational audit
-    await this.prisma.auditLog.create({
-      data: {
-        hospitalId: tenantId,
-        userId: currentUser.id,
-        action: AuditAction.CREATE,
-        entityName: 'MedicalRecordAmendment',
-        entityId: amendment.id,
-        changesJson: {
-          action: 'CREATE_AMENDMENT',
+      // Create amendment record WITHOUT modifying MedicalRecord base row
+      const created = await tx.medicalRecordAmendment.create({
+        data: {
+          recordId: encounter.medicalRecord.id,
+          amendedById: doctor.id,
           amendmentNumber: nextAmendmentNumber,
-          section: amendment.section,
+          amendmentType: dto.amendmentType || AmendmentType.ADDENDUM,
+          section: dto.section || AmendmentSection.CLINICAL_NOTES,
+          reason: dto.reason.trim(),
+          content: dto.content.trim(),
         },
-      },
+        include: { amendedBy: { include: { user: true } } },
+      });
+
+      // Record operational audit
+      await tx.auditLog.create({
+        data: {
+          hospitalId: tenantId,
+          userId: currentUser.id,
+          action: AuditAction.CREATE,
+          entityName: 'MedicalRecordAmendment',
+          entityId: created.id,
+          changesJson: {
+            action: 'CREATE_AMENDMENT',
+            amendmentNumber: nextAmendmentNumber,
+            section: created.section,
+          },
+        },
+      });
+
+      return created;
     });
 
     return {

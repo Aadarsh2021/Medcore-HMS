@@ -1,4 +1,6 @@
-import { PrismaClient, Role, Gender, BloodGroup, AppointmentStatus, AppointmentType, EncounterStatus, DiagnosisType, AllergySeverity, MedicineForm, PrescriptionFrequency, PrescriptionStatus, LabOrderStatus, InvoiceStatus, InvoiceItemType, PaymentMethod, PaymentStatus } from '@prisma/client';
+import 'dotenv/config';
+import { PrismaClient, Role, Gender, BloodGroup, AppointmentStatus, AppointmentType, EncounterStatus, DiagnosisType, AllergySeverity, MedicineForm, PrescriptionFrequency, PrescriptionStatus, LabOrderStatus, LabResultFlag, InvoiceStatus, InvoiceItemType, PaymentMethod, PaymentStatus } from '@prisma/client';
+import { RoomType, BedStatus } from '@medcore/types';
 import * as bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
@@ -20,9 +22,19 @@ async function main() {
   await prisma.labCategory.deleteMany();
   await prisma.prescriptionNumberCounter.deleteMany();
   await prisma.prescriptionItem.deleteMany();
+  await (prisma as any).prescriptionDispenseItem?.deleteMany();
+  await (prisma as any).prescriptionDispense?.deleteMany();
   await prisma.prescription.deleteMany();
+  await (prisma as any).stockReceiptItem?.deleteMany();
+  await (prisma as any).stockReceipt?.deleteMany();
+  await (prisma as any).stockMovement?.deleteMany();
+  await (prisma as any).dispenseNumberCounter?.deleteMany();
+  await (prisma as any).stockReceiptNumberCounter?.deleteMany();
   await prisma.medicineBatch.deleteMany();
   await prisma.medicine.deleteMany();
+  await (prisma as any).bedAssignment.deleteMany();
+  await (prisma as any).bed.deleteMany();
+  await (prisma as any).room.deleteMany();
   await prisma.attachment.deleteMany();
   await prisma.allergy.deleteMany();
   await prisma.diagnosis.deleteMany();
@@ -419,6 +431,7 @@ async function main() {
   // Batch 1: Expiring in 6 months
   await prisma.medicineBatch.create({
     data: {
+      hospitalId: hospitalMetro.id,
       medicineId: medAmoxicillin.id,
       batchNumber: 'AUG-2025-04',
       manufacturingDate: new Date('2024-10-01'),
@@ -433,6 +446,7 @@ async function main() {
   // Batch 2: Expiring in 18 months
   await prisma.medicineBatch.create({
     data: {
+      hospitalId: hospitalMetro.id,
       medicineId: medAmoxicillin.id,
       batchNumber: 'AUG-2025-08',
       manufacturingDate: new Date('2025-02-01'),
@@ -459,6 +473,7 @@ async function main() {
 
   await prisma.medicineBatch.create({
     data: {
+      hospitalId: hospitalMetro.id,
       medicineId: medAtorvastatin.id,
       batchNumber: 'LIP-2025-01',
       manufacturingDate: new Date('2025-01-15'),
@@ -665,6 +680,7 @@ async function main() {
     data: {
       prescriptionId: prescription1.id,
       medicineId: medAtorvastatin.id,
+      medicineName: 'Atorvastatin 20mg',
       dosage: '20 mg',
       frequency: PrescriptionFrequency.OD,
       durationDays: 30,
@@ -678,10 +694,11 @@ async function main() {
   const labOrder1 = await prisma.labOrder.create({
     data: {
       hospitalId: hospitalMetro.id,
+      orderNumber: 'LAB-2025-0902-001',
       encounterId: encounter1.id,
       patientId: patient1.id,
       doctorId: docSharma.id,
-      status: LabOrderStatus.COMPLETED,
+      status: LabOrderStatus.APPROVED,
       clinicalNotes: 'Evaluate dyslipidemia in patient with exertional angina.',
     },
   });
@@ -690,14 +707,13 @@ async function main() {
     data: {
       orderId: labOrder1.id,
       testId: labTestLipid.id,
-      status: LabOrderStatus.COMPLETED,
       resultValue: '215 mg/dL',
-      isAbnormal: true,
+      resultValueNumeric: 215,
+      resultUnit: 'mg/dL',
+      flag: LabResultFlag.HIGH,
       referenceRangeText: 'Desirable: < 200 mg/dL',
       technicianNotes: 'Specimen collected after 12-hour overnight fast. Serum slightly lipemic.',
-      collectedAt: new Date('2025-09-02T11:00:00Z'),
       completedAt: new Date('2025-09-02T16:30:00Z'),
-      approvedAt: new Date('2025-09-02T17:00:00Z'),
     },
   });
 
@@ -766,6 +782,123 @@ async function main() {
       status: AppointmentStatus.CONFIRMED,
       type: AppointmentType.REGULAR,
       reason: 'Routine quarterly diabetes and metabolic follow-up.',
+    },
+  });
+
+  // 14. Inpatient Rooms, Beds & Inpatient Admission
+  console.log('Seeding Inpatient Rooms and Beds...');
+  const roomIcu = await (prisma as any).room.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      roomNumber: 'ICU-201',
+      name: 'Intensive Coronary Care Unit',
+      type: RoomType.ICU,
+      floor: '2',
+      departmentId: deptCardio.id,
+      dailyRate: 6500.0,
+    },
+  });
+
+  const roomGeneral = await (prisma as any).room.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      roomNumber: 'WARD-104',
+      name: 'General Medical Inpatient Ward',
+      type: RoomType.GENERAL_WARD,
+      floor: '1',
+      departmentId: deptGeneral.id,
+      dailyRate: 1500.0,
+    },
+  });
+
+  const roomDeluxe = await (prisma as any).room.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      roomNumber: 'PVT-302',
+      name: 'Executive Deluxe Suite',
+      type: RoomType.PRIVATE,
+      floor: '3',
+      departmentId: deptCardio.id,
+      dailyRate: 4500.0,
+    },
+  });
+
+  const bedIcu1 = await (prisma as any).bed.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      roomId: roomIcu.id,
+      bedNumber: 'ICU-201-A',
+      status: BedStatus.AVAILABLE,
+    },
+  });
+
+  const bedIcu2 = await (prisma as any).bed.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      roomId: roomIcu.id,
+      bedNumber: 'ICU-201-B',
+      status: BedStatus.AVAILABLE,
+    },
+  });
+
+  const bedGen1 = await (prisma as any).bed.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      roomId: roomGeneral.id,
+      bedNumber: 'GEN-104-01',
+      status: BedStatus.AVAILABLE,
+    },
+  });
+
+  const bedDeluxe = await (prisma as any).bed.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      roomId: roomDeluxe.id,
+      bedNumber: 'PVT-302-01',
+      status: BedStatus.OCCUPIED,
+    },
+  });
+
+  // Sample inpatient admission for Arjun Sharma
+  await (prisma as any).bedAssignment.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      bedId: bedDeluxe.id,
+      patientId: patient1.id,
+      admittedAt: new Date('2025-09-02T12:00:00Z'),
+      notes: 'Admitted for 48h telemetry observation post acute coronary angina episode.',
+    },
+  });
+
+  // 15. In-App Notifications
+  console.log('Seeding Sample Notifications...');
+  await prisma.notification.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      userId: userPatient1.id,
+      title: 'Lab Report Available',
+      message: 'Your Lipid Profile and Fasting Blood Glucose results have been verified by Pathology.',
+      channel: 'IN_APP',
+      status: 'SENT',
+      metadataJson: {
+        type: 'LAB_REPORT',
+        patientId: patient1.id,
+      },
+    },
+  });
+
+  await prisma.notification.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      userId: userDocSharma.id,
+      title: 'New Patient Inpatient Admission',
+      message: 'Patient Arjun Sharma has been admitted to Executive Deluxe Suite PVT-302.',
+      channel: 'IN_APP',
+      status: 'SENT',
+      metadataJson: {
+        type: 'BED_ASSIGNMENT',
+        bedId: bedDeluxe.id,
+      },
     },
   });
 

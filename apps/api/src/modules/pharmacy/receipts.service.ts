@@ -2,9 +2,11 @@ import {
   Injectable,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   NotFoundException,
   Logger,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../../database/prisma.service';
 import { IdempotencyService } from './idempotency.service';
 import { CreateStockReceiptDto } from './dto';
@@ -29,6 +31,18 @@ export class ReceiptsService {
     userId: string,
     idempotencyKey?: string,
   ) {
+    // 0. Verify receiving staff active membership
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        hospitalId,
+        isActive: true,
+      },
+    });
+    if (!user) {
+      throw new ForbiddenException('User is not an active staff member of this hospital');
+    }
+
     // 1. Idempotency check
     const cached = await this.idempotencyService.checkIdempotency(
       hospitalId,
@@ -100,8 +114,17 @@ export class ReceiptsService {
 
       const hospCode = hospital?.code || 'HOSP';
       const year = new Date().getFullYear();
-      const count = await tx.stockReceipt.count({ where: { hospitalId } });
-      const receiptNumber = `GRN-${hospCode}-${year}-${String(count + 1).padStart(6, '0')}`;
+      const existingCount = await tx.stockReceipt.count({ where: { hospitalId } });
+      const counterId = randomUUID();
+      const counterResult = await tx.$queryRaw<Array<{ lastNumber: number }>>`
+        INSERT INTO "StockReceiptNumberCounter" ("id", "hospitalId", "year", "lastNumber", "updatedAt")
+        VALUES (${counterId}, ${hospitalId}, ${year}, ${existingCount + 1}, NOW())
+        ON CONFLICT ("hospitalId", "year")
+        DO UPDATE SET "lastNumber" = GREATEST("StockReceiptNumberCounter"."lastNumber" + 1, ${existingCount + 1}), "updatedAt" = NOW()
+        RETURNING "lastNumber";
+      `;
+      const nextSeq = Number(counterResult[0].lastNumber);
+      const receiptNumber = `GRN-${hospCode}-${year}-${String(nextSeq).padStart(6, '0')}`;
 
       // Calculate total cost
       const totalCost = dto.items.reduce(

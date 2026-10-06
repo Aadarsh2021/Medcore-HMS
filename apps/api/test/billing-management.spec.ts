@@ -11,8 +11,9 @@ import { InvoiceNumberService } from '../src/modules/billing/invoice-number.serv
 import { IdempotencyService } from '../src/modules/billing/idempotency.service';
 import { PaymentProviderService } from '../src/modules/billing/payment-provider.service';
 import { BillingService } from '../src/modules/billing/billing.service';
+import { BillingController } from '../src/modules/billing/billing.controller';
 import { FinancialCalculator } from '../src/modules/billing/financial-calculator';
-import { AuditAction } from '@prisma/client';
+import { AuditAction, WebhookProcessingStatus } from '@prisma/client';
 import {
   InvoiceStatus,
   InvoiceItemType,
@@ -29,6 +30,7 @@ describe('Phase 9 — Billing, Invoicing & Payments Integration Suite', () => {
   let idempotencyService: IdempotencyService;
   let paymentProviderService: PaymentProviderService;
   let billingService: BillingService;
+  let billingController: BillingController;
 
   // Hospital A
   let hospitalAId: string;
@@ -84,6 +86,9 @@ describe('Phase 9 — Billing, Invoicing & Payments Integration Suite', () => {
       idempotencyService,
       paymentProviderService,
     );
+    billingController = new BillingController(billingService, paymentProviderService);
+    process.env.STRIPE_WEBHOOK_SECRET = 'whsec_test_stripe_secret_key';
+    process.env.RAZORPAY_WEBHOOK_SECRET = 'rzp_test_razorpay_secret_key';
 
     // 1. Fetch 2 multi-tenant hospitals
     const hospitals = await prisma.raw.hospital.findMany({
@@ -1802,8 +1807,19 @@ describe('Phase 9 — Billing, Invoicing & Payments Integration Suite', () => {
   // SECTION I: WEBHOOKS & SECURITY (53–57)
   // ===========================================================================
 
-  it('53. should reject webhook with invalid signature', () => {
-    const payload = JSON.stringify({ event: 'payment.captured' });
+  const signStripe = (payload: string, secret: string = 'whsec_test_stripe_secret_key'): string => {
+    const timestamp = Math.floor(Date.now() / 1000);
+    const signedPayload = `${timestamp}.${payload}`;
+    const sigHash = crypto.createHmac('sha256', secret).update(signedPayload).digest('hex');
+    return `t=${timestamp},v1=${sigHash}`;
+  };
+
+  const signRazorpay = (payload: string, secret: string = 'rzp_test_razorpay_secret_key'): string => {
+    return crypto.createHmac('sha256', secret).update(payload).digest('hex');
+  };
+
+  it('53. should reject webhook with invalid signature', async () => {
+    const payload = JSON.stringify({ id: 'evt_bad_sig_1', event: 'payment.captured' });
     const fakeSignature = 'bad_signature_value';
 
     const isValid = paymentProviderService.verifyWebhookSignature(
@@ -1813,10 +1829,21 @@ describe('Phase 9 — Billing, Invoicing & Payments Integration Suite', () => {
       'test_secret_key',
     );
     expect(isValid).toBe(false);
+
+    // Controller level rejection with 401 Unauthorized
+    await expect(
+      billingController.handleWebhook(
+        { rawBody: Buffer.from(payload) },
+        'RAZORPAY',
+        undefined,
+        fakeSignature,
+        payload,
+      ),
+    ).rejects.toThrow(UnauthorizedException);
   });
 
   it('54. should verify and accept valid signed Razorpay webhook event', () => {
-    const secret = 'mock_test_webhook_secret_key';
+    const secret = 'rzp_test_razorpay_secret_key';
     const payload = JSON.stringify({ id: 'evt_1', event: 'payment.captured', payload: {} });
     const validSignature = crypto.createHmac('sha256', secret).update(payload).digest('hex');
 
@@ -1829,8 +1856,8 @@ describe('Phase 9 — Billing, Invoicing & Payments Integration Suite', () => {
     expect(isValid).toBe(true);
   });
 
-  it('55. should verify and accept valid signed Stripe webhook event', () => {
-    const secret = 'mock_test_webhook_signing_secret';
+  it('55. [Webhook 1: Valid Stripe Webhook] should verify and accept valid signed Stripe webhook event', () => {
+    const secret = 'whsec_test_stripe_secret_key';
     const payload = JSON.stringify({ id: 'evt_stripe_1', type: 'payment_intent.succeeded' });
     const timestamp = Math.floor(Date.now() / 1000);
     const signedPayload = `${timestamp}.${payload}`;
@@ -1863,6 +1890,250 @@ describe('Phase 9 — Billing, Invoicing & Payments Integration Suite', () => {
 
     const second = await paymentProviderService.recordWebhookEvent(parsed, raw, hospitalAId);
     expect(second.isDuplicate).toBe(true);
+  });
+
+  it('56a. [Webhook 3 & 4: Successful Payment & Duplicate Webhook] should authoritatively apply payment to invoice and handle duplicate webhook idempotently', async () => {
+    const invoice = await withTenant(hospitalAId, () =>
+      billingService.createInvoice(
+        hospitalAId,
+        { id: accountantAUserId, role: UserRole.ACCOUNTANT },
+        {
+          patientId: patientAId,
+          items: [{ description: 'Cardiology Visit', quantity: 1, unitPrice: 1200 }],
+        },
+      ),
+    );
+    createdInvoiceIds.push(invoice.id);
+    await withTenant(hospitalAId, () =>
+      billingService.issueInvoice(hospitalAId, { id: accountantAUserId }, invoice.id),
+    );
+
+    const eventId = `evt_stripe_succ_${Date.now()}`;
+    const paymentIntentId = `pi_succ_${Date.now()}`;
+    const bodyObj = {
+      id: eventId,
+      type: 'payment_intent.succeeded',
+      data: {
+        object: {
+          id: paymentIntentId,
+          amount: 120000,
+          currency: 'inr',
+          metadata: { invoiceId: invoice.id, hospitalId: hospitalAId },
+        },
+      },
+    };
+    const rawPayload = JSON.stringify(bodyObj);
+    const signature = signStripe(rawPayload);
+
+    // First webhook delivery: Processes successfully
+    const response = await billingController.handleWebhook(
+      { rawBody: Buffer.from(rawPayload) },
+      'STRIPE',
+      signature,
+      undefined,
+      bodyObj,
+    );
+
+    expect(response.status).toBe('PROCESSED');
+    expect(response.paymentId).toBeDefined();
+    if (response.paymentId) createdPaymentIds.push(response.paymentId);
+
+    // Verify invoice transitioned to PAID
+    const updatedInvoice = await prisma.raw.invoice.findUnique({
+      where: { id: invoice.id },
+    });
+    expect(updatedInvoice?.status).toBe(InvoiceStatus.PAID);
+    expect(Number(updatedInvoice?.paidAmount)).toBe(1200);
+
+    // Verify Payment record created
+    const paymentRecord = await prisma.raw.payment.findFirst({
+      where: { invoiceId: invoice.id, transactionReference: paymentIntentId },
+    });
+    expect(paymentRecord).toBeDefined();
+    expect(paymentRecord?.method).toBe(PaymentMethod.STRIPE);
+    expect(paymentRecord?.status).toBe(PaymentStatus.SUCCESS);
+
+    // Verify Audit Log created
+    const auditLog = await prisma.raw.auditLog.findFirst({
+      where: { entityId: paymentRecord?.id, entityName: 'Payment' },
+    });
+    expect(auditLog).toBeDefined();
+
+    // Second webhook delivery (Duplicate): Ignored idempotently
+    const dupResponse = await billingController.handleWebhook(
+      { rawBody: Buffer.from(rawPayload) },
+      'STRIPE',
+      signature,
+      undefined,
+      bodyObj,
+    );
+    expect(dupResponse.status).toBe('IGNORED_DUPLICATE');
+
+    // Verify no second payment created
+    const paymentCount = await prisma.raw.payment.count({
+      where: { invoiceId: invoice.id },
+    });
+    expect(paymentCount).toBe(1);
+  });
+
+  it('56b. [Webhook 5: Wrong Invoice] should reject webhook for non-existent invoice and mark event FAILED', async () => {
+    const nonExistentInvoiceId = '00000000-0000-0000-0000-000000000000';
+    const eventId = `evt_wrong_inv_${Date.now()}`;
+    const bodyObj = {
+      id: eventId,
+      type: 'payment_intent.succeeded',
+      data: {
+        object: {
+          id: `pi_wrong_${Date.now()}`,
+          amount: 50000,
+          currency: 'inr',
+          metadata: { invoiceId: nonExistentInvoiceId, hospitalId: hospitalAId },
+        },
+      },
+    };
+    const rawPayload = JSON.stringify(bodyObj);
+    const signature = signStripe(rawPayload);
+
+    await expect(
+      billingController.handleWebhook(
+        { rawBody: Buffer.from(rawPayload) },
+        'STRIPE',
+        signature,
+        undefined,
+        bodyObj,
+      ),
+    ).rejects.toThrow(NotFoundException);
+
+    // Verify event was logged as FAILED
+    const eventRecord = await prisma.raw.paymentProviderEvent.findUnique({
+      where: { eventId },
+    });
+    expect(eventRecord?.processingStatus).toBe(WebhookProcessingStatus.FAILED);
+    expect(eventRecord?.failureReason).toContain('not found');
+    if (eventRecord) createdEventIds.push(eventRecord.id);
+  });
+
+  it('56c. [Webhook 6: Wrong Amount] should reject payment amount exceeding remaining invoice balance', async () => {
+    const invoice = await withTenant(hospitalAId, () =>
+      billingService.createInvoice(
+        hospitalAId,
+        { id: accountantAUserId, role: UserRole.ACCOUNTANT },
+        {
+          patientId: patientAId,
+          items: [{ description: 'Minor Procedure', quantity: 1, unitPrice: 300 }],
+        },
+      ),
+    );
+    createdInvoiceIds.push(invoice.id);
+    await withTenant(hospitalAId, () =>
+      billingService.issueInvoice(hospitalAId, { id: accountantAUserId }, invoice.id),
+    );
+
+    const eventId = `evt_overpay_${Date.now()}`;
+    const bodyObj = {
+      id: eventId,
+      type: 'payment_intent.succeeded',
+      data: {
+        object: {
+          id: `pi_overpay_${Date.now()}`,
+          amount: 999900, // 9999 INR vs 300 INR outstanding
+          currency: 'inr',
+          metadata: { invoiceId: invoice.id, hospitalId: hospitalAId },
+        },
+      },
+    };
+    const rawPayload = JSON.stringify(bodyObj);
+    const signature = signStripe(rawPayload);
+
+    await expect(
+      billingController.handleWebhook(
+        { rawBody: Buffer.from(rawPayload) },
+        'STRIPE',
+        signature,
+        undefined,
+        bodyObj,
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    const eventRecord = await prisma.raw.paymentProviderEvent.findUnique({
+      where: { eventId },
+    });
+    expect(eventRecord?.processingStatus).toBe(WebhookProcessingStatus.FAILED);
+    expect(eventRecord?.failureReason).toContain('exceeds remaining outstanding balance');
+    if (eventRecord) createdEventIds.push(eventRecord.id);
+  });
+
+  it('56d. [Webhook 7: Already-Paid Invoice] should reject payment attempts against already settled invoice', async () => {
+    const invoice = await withTenant(hospitalAId, () =>
+      billingService.createInvoice(
+        hospitalAId,
+        { id: accountantAUserId, role: UserRole.ACCOUNTANT },
+        {
+          patientId: patientAId,
+          items: [{ description: 'Eye Checkup', quantity: 1, unitPrice: 400 }],
+        },
+      ),
+    );
+    createdInvoiceIds.push(invoice.id);
+    await withTenant(hospitalAId, () =>
+      billingService.issueInvoice(hospitalAId, { id: accountantAUserId }, invoice.id),
+    );
+
+    // Record settling cash payment
+    await withTenant(hospitalAId, () =>
+      billingService.recordPayment(hospitalAId, { id: accountantAUserId, role: UserRole.ACCOUNTANT }, invoice.id, {
+        amount: 400,
+        method: PaymentMethod.CASH,
+      }),
+    );
+
+    const eventId = `evt_already_paid_${Date.now()}`;
+    const bodyObj = {
+      id: eventId,
+      type: 'payment_intent.succeeded',
+      data: {
+        object: {
+          id: `pi_late_${Date.now()}`,
+          amount: 40000,
+          currency: 'inr',
+          metadata: { invoiceId: invoice.id, hospitalId: hospitalAId },
+        },
+      },
+    };
+    const rawPayload = JSON.stringify(bodyObj);
+    const signature = signStripe(rawPayload);
+
+    await expect(
+      billingController.handleWebhook(
+        { rawBody: Buffer.from(rawPayload) },
+        'STRIPE',
+        signature,
+        undefined,
+        bodyObj,
+      ),
+    ).rejects.toThrow(BadRequestException);
+
+    const eventRecord = await prisma.raw.paymentProviderEvent.findUnique({
+      where: { eventId },
+    });
+    expect(eventRecord?.processingStatus).toBe(WebhookProcessingStatus.FAILED);
+    expect(eventRecord?.failureReason).toContain('already fully paid');
+    if (eventRecord) createdEventIds.push(eventRecord.id);
+  });
+
+  it('56e. [Webhook 8: Malformed Payload] should reject malformed or non-JSON webhook payloads', async () => {
+    const malformedPayload = '{"id": "evt_malformed", "type": '; // Truncated JSON
+    const signature = signStripe(malformedPayload);
+
+    await expect(
+      billingController.handleWebhook(
+        { rawBody: Buffer.from(malformedPayload) },
+        'STRIPE',
+        signature,
+        undefined,
+        malformedPayload,
+      ),
+    ).rejects.toThrow(BadRequestException);
   });
 
   it('57. should prevent client spoofing of provider transaction state', async () => {
@@ -1971,5 +2242,167 @@ describe('Phase 9 — Billing, Invoicing & Payments Integration Suite', () => {
       expect(serialized).not.toContain('password');
       expect(serialized).not.toContain('token');
     });
+  });
+
+  // ===========================================================================
+  // SECTION K: CRITICAL CONCURRENCY & RACE-CONDITION HARDENING (61–62)
+  // ===========================================================================
+
+  it('61. [Critical Concurrency] Invoice = ₹10,000, concurrent A = ₹7,000 & B = ₹6,000: paid amount never exceeds limit and DB invariants hold', async () => {
+    // 1. Create and issue invoice of ₹10,000
+    const invoice = await withTenant(hospitalAId, () =>
+      billingService.createInvoice(
+        hospitalAId,
+        { id: accountantAUserId, role: UserRole.ACCOUNTANT },
+        {
+          patientId: patientAId,
+          items: [{ description: 'Major Surgical Consultation & Procedure', quantity: 1, unitPrice: 10000 }],
+        },
+      ),
+    );
+    createdInvoiceIds.push(invoice.id);
+
+    await withTenant(hospitalAId, () =>
+      billingService.issueInvoice(hospitalAId, { id: accountantAUserId }, invoice.id),
+    );
+
+    // 2. Launch concurrent payments A (₹7,000) and B (₹6,000)
+    const [resultA, resultB] = await Promise.allSettled([
+      withTenant(hospitalAId, () =>
+        billingService.recordPayment(
+          hospitalAId,
+          { id: accountantAUserId, role: UserRole.ACCOUNTANT },
+          invoice.id,
+          { amount: 7000, method: PaymentMethod.CASH },
+        ),
+      ),
+      withTenant(hospitalAId, () =>
+        billingService.recordPayment(
+          hospitalAId,
+          { id: accountantAUserId, role: UserRole.ACCOUNTANT },
+          invoice.id,
+          { amount: 6000, method: PaymentMethod.CARD },
+        ),
+      ),
+    ]);
+
+    // 3. Exactly one payment must succeed and one must fail
+    const succeeded = [resultA, resultB].filter((r) => r.status === 'fulfilled');
+    const rejected = [resultA, resultB].filter((r) => r.status === 'rejected');
+
+    expect(succeeded.length).toBe(1);
+    expect(rejected.length).toBe(1);
+
+    const winningResult = (succeeded[0] as PromiseFulfilledResult<any>).value;
+    const losingError = (rejected[0] as PromiseRejectedResult).reason;
+
+    expect(losingError).toBeInstanceOf(BadRequestException);
+    expect(losingError.message).toMatch(/exceeds remaining outstanding balance/i);
+
+    if (winningResult?.payment?.id) {
+      createdPaymentIds.push(winningResult.payment.id);
+    }
+
+    // 4. Verify actual database state directly
+    const dbInvoice = await prisma.raw.invoice.findUnique({
+      where: { id: invoice.id },
+    });
+    expect(dbInvoice).toBeDefined();
+
+    const actualPaid = Number(dbInvoice?.paidAmount);
+    expect([6000, 7000]).toContain(actualPaid);
+    expect(actualPaid).toBeLessThanOrEqual(10000);
+    expect(dbInvoice?.status).toBe(InvoiceStatus.PARTIALLY_PAID);
+
+    // Verify payment records in database
+    const dbPayments = await prisma.raw.payment.findMany({
+      where: { invoiceId: invoice.id },
+    });
+    expect(dbPayments.length).toBe(1);
+    expect(Number(dbPayments[0].amount)).toBe(actualPaid);
+    expect(dbPayments[0].status).toBe(PaymentStatus.SUCCESS);
+  });
+
+  it('62. [Critical Concurrency] should handle concurrent identical provider webhooks without race conditions or duplicate payments', async () => {
+    // 1. Create and issue invoice of ₹5,000
+    const invoice = await withTenant(hospitalAId, () =>
+      billingService.createInvoice(
+        hospitalAId,
+        { id: accountantAUserId, role: UserRole.ACCOUNTANT },
+        {
+          patientId: patientAId,
+          items: [{ description: 'Cardiology Diagnostics', quantity: 1, unitPrice: 5000 }],
+        },
+      ),
+    );
+    createdInvoiceIds.push(invoice.id);
+
+    await withTenant(hospitalAId, () =>
+      billingService.issueInvoice(hospitalAId, { id: accountantAUserId }, invoice.id),
+    );
+
+    // 2. Prepare identical webhook payload and cryptographic signature
+    const eventId = `evt_race_webhook_${Date.now()}`;
+    const paymentIntentId = `pi_race_${Date.now()}`;
+    const bodyObj = {
+      id: eventId,
+      type: 'payment_intent.succeeded',
+      data: {
+        object: {
+          id: paymentIntentId,
+          amount: 500000, // 5000 INR in paise/cents
+          currency: 'inr',
+          metadata: { invoiceId: invoice.id, hospitalId: hospitalAId },
+        },
+      },
+    };
+    const rawPayload = JSON.stringify(bodyObj);
+    const signature = signStripe(rawPayload);
+
+    // 3. Fire concurrent identical webhooks
+    const [res1, res2] = await Promise.all([
+      billingController.handleWebhook(
+        { rawBody: Buffer.from(rawPayload) },
+        'STRIPE',
+        signature,
+        undefined,
+        bodyObj,
+      ),
+      billingController.handleWebhook(
+        { rawBody: Buffer.from(rawPayload) },
+        'STRIPE',
+        signature,
+        undefined,
+        bodyObj,
+      ),
+    ]);
+
+    const statuses = [res1.status, res2.status].sort();
+    expect(statuses).toEqual(['IGNORED_DUPLICATE', 'PROCESSED']);
+
+    const processedRes = res1.status === 'PROCESSED' ? res1 : res2;
+    if (processedRes.paymentId) {
+      createdPaymentIds.push(processedRes.paymentId);
+    }
+
+    // 4. Verify database state directly: exactly one payment record, correct balance, exactly one event log
+    const dbInvoice = await prisma.raw.invoice.findUnique({
+      where: { id: invoice.id },
+    });
+    expect(dbInvoice?.status).toBe(InvoiceStatus.PAID);
+    expect(Number(dbInvoice?.paidAmount)).toBe(5000);
+
+    const dbPayments = await prisma.raw.payment.findMany({
+      where: { invoiceId: invoice.id },
+    });
+    expect(dbPayments.length).toBe(1);
+    expect(Number(dbPayments[0].amount)).toBe(5000);
+    expect(dbPayments[0].transactionReference).toBe(paymentIntentId);
+
+    const eventRecord = await prisma.raw.paymentProviderEvent.findUnique({
+      where: { eventId },
+    });
+    expect(eventRecord).toBeDefined();
+    if (eventRecord) createdEventIds.push(eventRecord.id);
   });
 });

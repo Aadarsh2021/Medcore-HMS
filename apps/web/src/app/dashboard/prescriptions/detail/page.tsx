@@ -194,7 +194,7 @@ function PrescriptionDetailContent() {
                       </span>
                       {item.instructions && (
                         <div className="text-[11px] text-slate-500 italic mt-0.5">
-                          "{item.instructions}"
+                          &ldquo;{item.instructions}&rdquo;
                         </div>
                       )}
                     </td>

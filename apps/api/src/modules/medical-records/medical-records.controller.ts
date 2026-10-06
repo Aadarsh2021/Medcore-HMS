@@ -139,8 +139,9 @@ export class MedicalRecordsController {
     @CurrentTenant() tenantId: string | null,
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateAllergyDto,
+    @CurrentUser() user: any,
   ) {
-    const data = await this.medicalRecordsService.addAllergy(tenantId, patientId, dto);
+    const data = await this.medicalRecordsService.addAllergy(tenantId, patientId, dto, user);
     return {
       success: true,
       data,
@@ -161,8 +162,9 @@ export class MedicalRecordsController {
     @CurrentTenant() tenantId: string | null,
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateMedicationHistoryDto,
+    @CurrentUser() user: any,
   ) {
-    const data = await this.medicalRecordsService.addMedicationHistory(tenantId, patientId, dto);
+    const data = await this.medicalRecordsService.addMedicationHistory(tenantId, patientId, dto, user);
     return {
       success: true,
       data,
@@ -183,8 +185,9 @@ export class MedicalRecordsController {
     @CurrentTenant() tenantId: string | null,
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateVaccinationDto,
+    @CurrentUser() user: any,
   ) {
-    const data = await this.medicalRecordsService.addVaccination(tenantId, patientId, dto);
+    const data = await this.medicalRecordsService.addVaccination(tenantId, patientId, dto, user);
     return {
       success: true,
       data,
@@ -205,8 +208,9 @@ export class MedicalRecordsController {
     @CurrentTenant() tenantId: string | null,
     @Param('patientId', ParseUUIDPipe) patientId: string,
     @Body() dto: CreateFamilyHistoryDto,
+    @CurrentUser() user: any,
   ) {
-    const data = await this.medicalRecordsService.addFamilyHistory(tenantId, patientId, dto);
+    const data = await this.medicalRecordsService.addFamilyHistory(tenantId, patientId, dto, user);
     return {
       success: true,
       data,

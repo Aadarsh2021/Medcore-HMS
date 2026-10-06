@@ -345,7 +345,7 @@ function PatientDetailContent() {
                       <div className="text-xs text-slate-500">
                         Doctor: {apt.doctor?.user.firstName} {apt.doctor?.user.lastName} ({apt.doctor?.specialization})
                       </div>
-                      {apt.reason && <div className="text-xs text-slate-600 mt-1 italic">"{apt.reason}"</div>}
+                      {apt.reason && <div className="text-xs text-slate-600 mt-1 italic">&ldquo;{apt.reason}&rdquo;</div>}
                     </div>
                     <Badge variant={apt.status === 'COMPLETED' ? 'success' : 'neutral'}>
                       {apt.status}

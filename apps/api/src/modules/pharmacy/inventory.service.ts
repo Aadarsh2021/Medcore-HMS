@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../../database/prisma.service';
@@ -181,6 +182,17 @@ export class InventoryService {
     dto: QuarantineBatchDto,
     userId: string,
   ) {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        hospitalId,
+        isActive: true,
+      },
+    });
+    if (!user) {
+      throw new ForbiddenException('User is not an active staff member of this hospital');
+    }
+
     const batch = await this.prisma.medicineBatch.findFirst({
       where: { id: batchId, hospitalId },
       include: { medicine: true },
@@ -242,6 +254,17 @@ export class InventoryService {
     userId: string,
     idempotencyKey?: string,
   ) {
+    const user = await this.prisma.user.findFirst({
+      where: {
+        id: userId,
+        hospitalId,
+        isActive: true,
+      },
+    });
+    if (!user) {
+      throw new ForbiddenException('User is not an active staff member of this hospital');
+    }
+
     // Check idempotency replay
     const cached = await this.idempotencyService.checkIdempotency(
       hospitalId,
