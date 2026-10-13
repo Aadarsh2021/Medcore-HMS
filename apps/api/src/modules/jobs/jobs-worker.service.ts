@@ -34,13 +34,40 @@ export class JobsWorkerService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly notificationsService: NotificationsService,
   ) {
-    this.connection = {
-      host: this.configService.get<string>('REDIS_HOST', 'localhost'),
-      port: this.configService.get<number>('REDIS_PORT', 6379),
-      password: this.configService.get<string>('REDIS_PASSWORD', undefined) || undefined,
-      maxRetriesPerRequest: null,
-      connectTimeout: 2000,
-    };
+    const redisUrl = this.configService.get<string>('REDIS_URL');
+
+    if (redisUrl) {
+      try {
+        const parsed = new URL(redisUrl);
+        const isTls = parsed.protocol === 'rediss:';
+        this.connection = {
+          host: parsed.hostname,
+          port: parsed.port ? Number(parsed.port) : (isTls ? 6380 : 6379),
+          username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+          password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+          tls: isTls ? { rejectUnauthorized: false } : undefined,
+          maxRetriesPerRequest: null,
+          connectTimeout: 2000,
+        };
+      } catch (err: any) {
+        this.logger.error(`Invalid REDIS_URL in worker: ${err.message}. Falling back to default host/port.`);
+        this.connection = {
+          host: this.configService.get<string>('REDIS_HOST', 'localhost'),
+          port: this.configService.get<number>('REDIS_PORT', 6379),
+          password: this.configService.get<string>('REDIS_PASSWORD', undefined) || undefined,
+          maxRetriesPerRequest: null,
+          connectTimeout: 2000,
+        };
+      }
+    } else {
+      this.connection = {
+        host: this.configService.get<string>('REDIS_HOST', 'localhost'),
+        port: this.configService.get<number>('REDIS_PORT', 6379),
+        password: this.configService.get<string>('REDIS_PASSWORD', undefined) || undefined,
+        maxRetriesPerRequest: null,
+        connectTimeout: 2000,
+      };
+    }
   }
 
   async onModuleInit(): Promise<void> {

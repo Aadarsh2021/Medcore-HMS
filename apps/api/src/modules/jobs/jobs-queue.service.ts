@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
+import { Injectable, Logger, OnModuleDestroy, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Queue, ConnectionOptions } from 'bullmq';
 import {
@@ -29,13 +29,41 @@ export class JobsQueueService implements OnModuleDestroy {
   public isRedisHealthy = true;
 
   constructor(private readonly configService: ConfigService) {
-    const connection: ConnectionOptions = {
-      host: this.configService.get<string>('REDIS_HOST', 'localhost'),
-      port: this.configService.get<number>('REDIS_PORT', 6379),
-      password: this.configService.get<string>('REDIS_PASSWORD', undefined) || undefined,
-      maxRetriesPerRequest: null,
-      connectTimeout: 2000,
-    };
+    let connection: ConnectionOptions;
+    const redisUrl = this.configService.get<string>('REDIS_URL');
+
+    if (redisUrl) {
+      try {
+        const parsed = new URL(redisUrl);
+        const isTls = parsed.protocol === 'rediss:';
+        connection = {
+          host: parsed.hostname,
+          port: parsed.port ? Number(parsed.port) : (isTls ? 6380 : 6379),
+          username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
+          password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
+          tls: isTls ? { rejectUnauthorized: false } : undefined,
+          maxRetriesPerRequest: null,
+          connectTimeout: 2000,
+        };
+      } catch (err: any) {
+        this.logger.error(`Invalid REDIS_URL format: ${err.message}. Falling back to individual host/port configs.`);
+        connection = {
+          host: this.configService.get<string>('REDIS_HOST', 'localhost'),
+          port: this.configService.get<number>('REDIS_PORT', 6379),
+          password: this.configService.get<string>('REDIS_PASSWORD', undefined) || undefined,
+          maxRetriesPerRequest: null,
+          connectTimeout: 2000,
+        };
+      }
+    } else {
+      connection = {
+        host: this.configService.get<string>('REDIS_HOST', 'localhost'),
+        port: this.configService.get<number>('REDIS_PORT', 6379),
+        password: this.configService.get<string>('REDIS_PASSWORD', undefined) || undefined,
+        maxRetriesPerRequest: null,
+        connectTimeout: 2000,
+      };
+    }
 
     const defaultJobOptions = {
       attempts: 3,
@@ -91,6 +119,61 @@ export class JobsQueueService implements OnModuleDestroy {
   }
 
   /**
+   * Safe queue addition with bounded timeout (defaults to 3000ms).
+   * Prevents HTTP requests from hanging indefinitely when Redis is unprovisioned or unreachable.
+   */
+  async addWithTimeout(
+    queue: Queue,
+    name: string,
+    payload: any,
+    opts?: any,
+    timeoutMs = 3000,
+  ): Promise<any> {
+    if (!this.isRedisHealthy) {
+      throw new ServiceUnavailableException(
+        'Background queue service (Redis) is currently unreachable. Configure REDIS_URL or use synchronous endpoints.',
+      );
+    }
+
+    let timeoutId: NodeJS.Timeout;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        this.isRedisHealthy = false;
+        reject(
+          new ServiceUnavailableException(
+            `Queue operation timed out after ${timeoutMs}ms. Redis connection is unreachable.`,
+          ),
+        );
+      }, timeoutMs);
+    });
+
+    const addPromise = queue.add(name, payload, opts);
+    // Suppress unhandledRejection if addPromise rejects after timeoutPromise has already settled
+    addPromise.catch((err) => {
+      this.logger.debug(`Background queue.add settled after timeout or error: ${err?.message}`);
+    });
+
+    try {
+      const job = await Promise.race([
+        addPromise,
+        timeoutPromise,
+      ]);
+      clearTimeout(timeoutId!);
+      return job;
+    } catch (err: any) {
+      clearTimeout(timeoutId!);
+      if (err instanceof ServiceUnavailableException) {
+        throw err;
+      }
+      this.isRedisHealthy = false;
+      this.logger.error(`BullMQ queue.add failed: ${err.message}`);
+      throw new ServiceUnavailableException(
+        `Background queue service unavailable: ${err.message}. Verify Redis connectivity.`,
+      );
+    }
+  }
+
+  /**
    * Enqueues appointment reminders scan for hospital tenant.
    * Uses deterministic jobId (e.g. appointment-reminders:hospitalId:YYYY-MM-DD-HH)
    * to guarantee idempotency across concurrent/duplicate calls.
@@ -110,7 +193,7 @@ export class JobsQueueService implements OnModuleDestroy {
       enqueuedAt: new Date().toISOString(),
     };
 
-    const job = await this.scansQueue.add(JOB_APPOINTMENT_REMINDERS, payload, {
+    const job = await this.addWithTimeout(this.scansQueue, JOB_APPOINTMENT_REMINDERS, payload, {
       jobId: deterministicId,
     });
 
@@ -134,7 +217,7 @@ export class JobsQueueService implements OnModuleDestroy {
       enqueuedAt: new Date().toISOString(),
     };
 
-    const job = await this.scansQueue.add(JOB_EXPIRY_SCAN, payload, {
+    const job = await this.addWithTimeout(this.scansQueue, JOB_EXPIRY_SCAN, payload, {
       jobId: deterministicId,
     });
 
@@ -154,7 +237,7 @@ export class JobsQueueService implements OnModuleDestroy {
       enqueuedAt: new Date().toISOString(),
     };
 
-    const job = await this.scansQueue.add(JOB_LOW_STOCK_SCAN, payload, {
+    const job = await this.addWithTimeout(this.scansQueue, JOB_LOW_STOCK_SCAN, payload, {
       jobId: deterministicId,
     });
 
@@ -174,7 +257,7 @@ export class JobsQueueService implements OnModuleDestroy {
       enqueuedAt: new Date().toISOString(),
     };
 
-    const job = await this.scansQueue.add(JOB_NO_SHOW_PROCESSING, payload, {
+    const job = await this.addWithTimeout(this.scansQueue, JOB_NO_SHOW_PROCESSING, payload, {
       jobId: deterministicId,
     });
 
@@ -188,7 +271,7 @@ export class JobsQueueService implements OnModuleDestroy {
   async enqueueNotificationDispatch(
     payload: NotificationDispatchJobPayload,
   ): Promise<{ jobId: string; queue: string }> {
-    const job = await this.notificationsQueue.add(JOB_NOTIFICATION_DISPATCH, payload);
+    const job = await this.addWithTimeout(this.notificationsQueue, JOB_NOTIFICATION_DISPATCH, payload);
     return { jobId: job.id || 'unknown', queue: QUEUE_NOTIFICATIONS };
   }
 }

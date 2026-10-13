@@ -1,4 +1,5 @@
 import { ConfigService } from '@nestjs/config';
+import { ServiceUnavailableException } from '@nestjs/common';
 import { Queue, Worker, Job } from 'bullmq';
 import RedisMock from 'ioredis-mock';
 import { PrismaService } from '../src/database/prisma.service';
@@ -230,5 +231,66 @@ describe('Phase 10 — BullMQ Production Worker & Queue Architecture Suite', () 
     expect(unreachableQueueService.notificationsQueue).toBeDefined();
 
     await unreachableQueueService.onModuleDestroy();
+  });
+
+  it('7. should fail fast with ServiceUnavailableException when Redis is unreachable or addWithTimeout times out', async () => {
+    const queueService = new JobsQueueService({
+      get: (key: string, def?: any) => {
+        if (key === 'REDIS_HOST') return '127.0.0.1';
+        if (key === 'REDIS_PORT') return 59998;
+        return def;
+      },
+    } as any);
+
+    // Mock a hanging add method that never resolves
+    const fakeQueue = {
+      add: jest.fn().mockImplementation(() => new Promise((resolve) => setTimeout(resolve, 10000))),
+    } as unknown as Queue;
+
+    // Must reject in 100ms with ServiceUnavailableException rather than hanging indefinitely
+    await expect(
+      queueService.addWithTimeout(fakeQueue, 'test-job', { data: 'test' }, {}, 100),
+    ).rejects.toThrow(ServiceUnavailableException);
+
+    await queueService.onModuleDestroy();
+  });
+
+  it('8. should parse secure rediss:// connection URLs and enable TLS', () => {
+    const queueService = new JobsQueueService({
+      get: (key: string, def?: any) => {
+        if (key === 'REDIS_URL') return 'rediss://default:supersecretpassword@upstash-redis.example.com:6380';
+        return def;
+      },
+    } as any);
+
+    const connectionOpts: any = queueService.scansQueue.opts.connection;
+    expect(connectionOpts.host).toBe('upstash-redis.example.com');
+    expect(connectionOpts.port).toBe(6380);
+    expect(connectionOpts.password).toBe('supersecretpassword');
+    expect(connectionOpts.tls).toBeDefined();
+    expect(connectionOpts.tls.rejectUnauthorized).toBe(false);
+
+    queueService.onModuleDestroy();
+  });
+
+  it('9. should successfully resolve addWithTimeout when queue operation completes within bounded window', async () => {
+    const queueService = new JobsQueueService({
+      get: (key: string, def?: any) => {
+        if (key === 'REDIS_HOST') return '127.0.0.1';
+        if (key === 'REDIS_PORT') return 6379;
+        return def;
+      },
+    } as any);
+
+    const mockJobResult = { id: 'job-resolved-123', name: 'fast-job' };
+    const fakeQueue = {
+      add: jest.fn().mockResolvedValue(mockJobResult),
+    } as unknown as Queue;
+
+    const result = await queueService.addWithTimeout(fakeQueue, 'fast-job', { test: true }, {}, 1000);
+    expect(result).toEqual(mockJobResult);
+    expect(fakeQueue.add).toHaveBeenCalledWith('fast-job', { test: true }, {});
+
+    await queueService.onModuleDestroy();
   });
 });
