@@ -12,10 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Ping Backend Health Endpoint
-        env:
-          API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://medcore-hms-api-7ie2.onrender.com/api' }}
         run: |
-          HEALTH_URL="${API_URL%/}/health"
+          HEALTH_URL="https://medcore-hms-api-7ie2.onrender.com/api/health"
           echo "Pinging Render backend health at: $HEALTH_URL"
           RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}\nTIME_TOTAL:%{time_total}" "$HEALTH_URL" || true)
           echo "$RESPONSE"
