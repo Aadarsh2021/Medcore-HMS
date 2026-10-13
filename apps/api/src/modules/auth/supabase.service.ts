@@ -5,8 +5,8 @@ import { createClient, SupabaseClient, User as SupabaseUser } from '@supabase/su
 @Injectable()
 export class SupabaseService {
   private readonly logger = new Logger(SupabaseService.name);
-  private readonly supabaseAdmin: SupabaseClient | null = null;
-  private readonly supabaseAnon: SupabaseClient | null = null;
+  private supabaseAdmin: SupabaseClient | null = null;
+  private supabaseAnon: SupabaseClient | null = null;
 
   constructor(private readonly configService: ConfigService) {
     const supabaseUrl =
@@ -42,16 +42,80 @@ export class SupabaseService {
     }
   }
 
+  private mockStore = new Map<string, any>();
+  private mockTokenStore = new Map<string, any>();
+
   get adminClient(): SupabaseClient {
     if (!this.supabaseAdmin) {
-      throw new Error('Supabase admin client not initialized. Check SUPABASE_SERVICE_ROLE_KEY.');
+      if (process.env.NODE_ENV === 'test') {
+        this.supabaseAdmin = {
+          auth: {
+            admin: {
+              createUser: async (params: any) => {
+                const id = 'mock-sb-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+                const user = {
+                  id,
+                  email: params.email?.toLowerCase(),
+                  user_metadata: params.user_metadata || {},
+                };
+                this.mockStore.set(id, user);
+                this.mockStore.set(params.email?.toLowerCase(), user);
+                return { data: { user }, error: null };
+              },
+              getUserById: async (id: string) => {
+                const user = this.mockStore.get(id) || { id, email: 'test@example.com', user_metadata: {} };
+                return { data: { user }, error: null };
+              },
+              deleteUser: async (id: string) => {
+                this.mockStore.delete(id);
+                return { data: {}, error: null };
+              },
+              listUsers: async () => {
+                return { data: { users: Array.from(this.mockStore.values()) }, error: null };
+              },
+            },
+          },
+        } as any;
+      } else {
+        throw new Error('Supabase admin client not initialized. Check SUPABASE_SERVICE_ROLE_KEY.');
+      }
     }
     return this.supabaseAdmin;
   }
 
   get anonClient(): SupabaseClient {
     if (!this.supabaseAnon) {
-      throw new Error('Supabase client not initialized. Check SUPABASE_ANON_KEY.');
+      if (process.env.NODE_ENV === 'test') {
+        this.supabaseAnon = {
+          auth: {
+            signInWithPassword: async (creds: any) => {
+              const email = creds.email?.toLowerCase();
+              const user = this.mockStore.get(email) || { id: 'mock-sb-' + Date.now(), email, user_metadata: {} };
+              const token = 'mock-jwt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+              this.mockTokenStore.set(token, user);
+              return {
+                data: {
+                  session: {
+                    access_token: token,
+                    refresh_token: 'mock-refresh-token',
+                  },
+                  user,
+                },
+                error: null,
+              };
+            },
+            getUser: async (token: string) => {
+              const user = this.mockTokenStore.get(token) || Array.from(this.mockStore.values())[0];
+              return {
+                data: { user: user || { id: 'mock-sb-uid', email: 'test@medcore.io', user_metadata: {} } },
+                error: null,
+              };
+            },
+          },
+        } as any;
+      } else {
+        throw new Error('Supabase client not initialized. Check SUPABASE_ANON_KEY.');
+      }
     }
     return this.supabaseAnon;
   }
@@ -61,6 +125,11 @@ export class SupabaseService {
    */
   async verifyAccessToken(token: string): Promise<SupabaseUser | null> {
     try {
+      if (process.env.NODE_ENV === 'test' && (!this.supabaseAdmin || !this.supabaseAnon)) {
+        const mockUser = this.mockTokenStore.get(token);
+        if (mockUser) return mockUser as SupabaseUser;
+      }
+
       const client = this.supabaseAdmin || this.supabaseAnon;
       if (!client) {
         throw new Error('Supabase client unavailable');

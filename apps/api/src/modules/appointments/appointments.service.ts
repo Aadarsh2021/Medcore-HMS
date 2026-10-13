@@ -517,6 +517,13 @@ export class AppointmentsService {
     try {
       created = await this.prisma.raw.$transaction(
         async (tx) => {
+          // A0. Exclusive Doctor Row Lock — serializes concurrent slot allocations for this doctor (ADR-002)
+          await tx.$queryRaw`
+            SELECT id FROM "Doctor"
+            WHERE id = ${dto.doctorId}
+            FOR UPDATE
+          `;
+
           // A. Exclusive Patient Row Lock — serializes concurrent bookings for the SAME patient
           await tx.$queryRaw`
             SELECT id FROM "Patient"
