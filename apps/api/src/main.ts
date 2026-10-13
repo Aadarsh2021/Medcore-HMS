@@ -30,7 +30,8 @@ async function bootstrap() {
       if (!origin || allowedOrigins.includes(origin) || process.env.NODE_ENV !== 'production') {
         callback(null, true);
       } else {
-        callback(new Error('CORS request rejected: origin not permitted'));
+        // Disallow origin cleanly according to CORS spec by returning false (omits Access-Control-Allow-Origin)
+        callback(null, false);
       }
     },
     credentials: true,
