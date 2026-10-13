@@ -61,24 +61,42 @@ export class StorageService {
   private readonly s3Endpoint?: string;
   private readonly isConfigured: boolean;
 
+  private sanitizeEnvValue(val?: string): string | undefined {
+    if (!val) return undefined;
+    const trimmed = val.trim().replace(/^["']|["']$/g, '');
+    if (trimmed.includes('=')) {
+      // In case user pasted KEY=VALUE into Cloud Dashboard's Value field
+      const parts = trimmed.split('=');
+      return parts.slice(1).join('=').trim().replace(/^["']|["']$/g, '');
+    }
+    return trimmed;
+  }
+
   constructor(private readonly configService: ConfigService) {
-    this.s3Endpoint =
+    const rawEndpoint =
       this.configService.get<string>('S3_ENDPOINT') ||
-      this.configService.get<string>('AWS_S3_ENDPOINT') ||
-      undefined;
-    this.s3Region =
+      this.configService.get<string>('AWS_S3_ENDPOINT');
+    this.s3Endpoint = this.sanitizeEnvValue(rawEndpoint) || undefined;
+
+    const rawRegion =
       this.configService.get<string>('S3_REGION') ||
       this.configService.get<string>('AWS_REGION', 'ap-south-1');
-    this.s3Bucket =
+    this.s3Region = this.sanitizeEnvValue(rawRegion) || 'ap-south-1';
+
+    const rawBucket =
       this.configService.get<string>('S3_BUCKET') ||
       this.configService.get<string>('AWS_S3_BUCKET', 'medcore-storage-bucket');
+    this.s3Bucket = this.sanitizeEnvValue(rawBucket) || 'medcore-storage-bucket';
 
-    const accessKeyId =
+    const rawAccessKeyId =
       this.configService.get<string>('S3_ACCESS_KEY_ID') ||
       this.configService.get<string>('AWS_ACCESS_KEY_ID');
-    const secretAccessKey =
+    const accessKeyId = this.sanitizeEnvValue(rawAccessKeyId);
+
+    const rawSecretAccessKey =
       this.configService.get<string>('S3_SECRET_ACCESS_KEY') ||
       this.configService.get<string>('AWS_SECRET_ACCESS_KEY');
+    const secretAccessKey = this.sanitizeEnvValue(rawSecretAccessKey);
 
     this.isConfigured = !!(accessKeyId && secretAccessKey);
 
