@@ -415,5 +415,11 @@ describe('Phase 11 & Phase 12 — Realtime Gateway & Storage Hardening Suite', (
       expect(downloadUrl).toContain('X-Amz-Signature=');
     });
   });
+
+  afterAll(async () => {
+    if (moduleRef) {
+      await moduleRef.close();
+    }
+  });
 });
 
