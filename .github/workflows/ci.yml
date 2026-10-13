@@ -72,11 +72,14 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm exec prisma generate --schema=prisma/schema.prisma
 
+      - name: Build Shared Types Package
+        run: pnpm --filter @medcore/types build
+
       - name: Push Schema to Test Database
         run: pnpm --filter @medcore/api db:push
 
-      - name: Build Shared Types Package
-        run: pnpm --filter @medcore/types build
+      - name: Seed Test Database
+        run: pnpm --filter @medcore/api db:seed
 
       - name: Run Workspace Linting
         run: pnpm lint
