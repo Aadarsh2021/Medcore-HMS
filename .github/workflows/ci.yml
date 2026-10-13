@@ -88,7 +88,12 @@ jobs:
         run: pnpm --filter @medcore/web exec tsc --noEmit
 
       - name: Execute Automated Test Suites
-        run: pnpm --filter @medcore/api test -- --runInBand
+        run: pnpm --filter @medcore/api test
+        env:
+          DATABASE_URL: "postgresql://postgres:postgrespassword@localhost:5432/medcore_test?schema=public"
+
+      - name: Execute Frontend Component Tests
+        run: pnpm --filter @medcore/web test
 
       - name: Build NestJS API (@medcore/api)
         run: pnpm --filter @medcore/api build
