@@ -13,7 +13,7 @@ jobs:
     steps:
       - name: Ping Backend Health Endpoint
         env:
-          API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://medcore-hms-api.onrender.com/api' }}
+          API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://medcore-hms-api-7ie2.onrender.com/api' }}
         run: |
           HEALTH_URL="${API_URL%/}/health"
           echo "Pinging Render backend health at: $HEALTH_URL"
