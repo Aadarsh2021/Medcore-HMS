@@ -80,52 +80,7 @@ describe('Phase 14 & Phase 18 — Patient Portal IDOR & Rate Limiting Security S
     });
 
     if (!hospitalWithPatients || hospitalWithPatients.patients.length < 2) {
-      let hosp = await prisma.raw.hospital.findFirst();
-      if (!hosp) {
-        const addr = await prisma.raw.address.create({
-          data: { street: '1 Test St', city: 'Test', state: 'TS', postalCode: '123456', country: 'India' },
-        });
-        hosp = await prisma.raw.hospital.create({
-          data: {
-            name: 'Security Test Hospital',
-            slug: `sec-test-${Date.now()}`,
-            code: `SEC-${Date.now().toString().slice(-4)}`,
-            status: 'ACTIVE',
-            addressId: addr.id,
-          },
-        });
-      }
-      for (let i = (hospitalWithPatients?.patients.length || 0); i < 2; i++) {
-        const u = await prisma.raw.user.create({
-          data: {
-            email: `sec_patient_${Date.now()}_${i}@test.com`,
-            passwordHash: '$2b$10$fakehashfortestisolationpurposesonly123',
-            role: 'PATIENT',
-            hospitalId: hosp.id,
-            firstName: `Patient${i}`,
-            lastName: 'Test',
-            isEmailVerified: true,
-          },
-        });
-        await prisma.raw.patient.create({
-          data: {
-            userId: u.id,
-            hospitalId: hosp.id,
-            uhid: `UHID-SEC-${Date.now()}-${i}`,
-            dateOfBirth: new Date('1990-01-01'),
-            gender: 'MALE',
-          },
-        });
-      }
-      hospitalWithPatients = await prisma.raw.hospital.findFirst({
-        where: { id: hosp.id },
-        include: {
-          patients: {
-            include: { user: true },
-            take: 2,
-          },
-        },
-      });
+      throw new Error('Test requires a hospital with at least two patients in test DB');
     }
 
     hospitalAId = hospitalWithPatients.id;
