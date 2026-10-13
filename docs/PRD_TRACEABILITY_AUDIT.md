@@ -3,7 +3,7 @@
 **Audited Against:** MedCore HMS Product Requirements Document (PRD Version 1.0, Academic Year 2024–2025; Source Document `70556f4ab625a79e3197ea428bb6dd2b.docx` / `docs/prd.txt`)  
 **Auditor:** Senior QA Automation Engineer, DevOps Engineer, Application Security Engineer & Healthcare Software Architect  
 **Audit Date:** October 13, 2026  
-**Repository Branch:** `main` (Verified Git Commit: `9c6d3e1` + local working tree fixes)  
+**Repository Branch:** `main` (Verified Git Commit: `4720e97` deployed and live verified)  
 **Live Targets Audited:**
 - Frontend: `https://medcore-hms-eea8e.web.app` (Firebase Hosting)
 - Backend API: `https://medcore-hms-api-7ie2.onrender.com` (Render Web Service)
@@ -23,7 +23,7 @@ Each requirement is graded using strict evidentiary criteria:
 - **`BLOCKED`**: Feature cannot function in live production due to missing cloud infrastructure (e.g. unprovisioned cloud Redis or S3 IAM credentials).
 - **`MISSING`**: Required submission deliverable or feature absent from the repository.
 
-### Current Audit Verdict: **PRODUCTION CANDIDATE (WITH P1 LIVE REDEPLOYMENT & CLOUD PROVISIONING PENDING)**
+### Current Audit Verdict: **PRODUCTION CANDIDATE (P1 SECURITY REMEDIATION DEPLOYED & LIVE VERIFIED; CLOUD REDIS/S3 PROVISIONING PENDING)**
 
 ---
 

@@ -1,8 +1,8 @@
 # MedCore HMS — Live Production Readiness & End-to-End Verification Audit
 
 **Audited By:** Senior QA Automation Engineer, DevOps Engineer, Application Security Engineer & Healthcare Software Architect  
-**Audit Date:** October 13, 2026 (Live Verification Executed at 11:46–12:05 UTC / 17:16–17:35 IST)  
-**Target Repository:** `Aadarsh2021/Medcore-HMS` (Branch: `main`, Base Git Commit: `9c6d3e1`)  
+**Audit Date:** October 13, 2026 (Live Verification Executed at 11:46–12:31 UTC / 17:16–18:01 IST)  
+**Target Repository:** `Aadarsh2021/Medcore-HMS` (Branch: `main`, Base Git Commit: `4720e97`)  
 **Deployment Topology:**
 - **Frontend:** Firebase Hosting (`https://medcore-hms-eea8e.web.app`)
 - **Backend API:** Render Web Service (`https://medcore-hms-api-7ie2.onrender.com`)
@@ -17,8 +17,8 @@ This audit represents an independent empirical verification of the MedCore Hospi
 
 ### Key Audit Findings & Remediations:
 1. **Live Connectivity & Database Readiness:** Both `/api/health` and `/api/ready` responded with HTTP `200 OK` in < 250ms with live database connectivity confirmed.
-2. **CORS & Origin Hardening (Fixed):** Resolved root cause of HTTP 500 error on unapproved origins by transitioning from `callback(new Error(...))` to `callback(null, false)`. Unapproved origins now cleanly have `Access-Control-Allow-Origin` omitted without unhandled server exceptions.
-3. **P1 Demo User Seeding Secured (Fixed):** `POST /api/auth/seed-demo-users` was stripped of `@Public()`, secured with `SupabaseAuthGuard` and `RolesGuard` (`SUPER_ADMIN` only), and explicitly blocked in production environments (`NODE_ENV === 'production'`). Regression suite (`auth-seed-security.spec.ts`) passed **10/10 tests**.
+2. **CORS & Origin Hardening (Deployed & Live Verified):** Resolved root cause of HTTP 500 error on unapproved origins by transitioning from `callback(new Error(...))` to `callback(null, false)`. Unapproved origins now cleanly have `Access-Control-Allow-Origin` omitted without unhandled server exceptions or 500 errors.
+3. **P1 Demo User Seeding Secured (Deployed & Live Verified):** `POST /api/auth/seed-demo-users` was stripped of `@Public()`, secured with `SupabaseAuthGuard` and `RolesGuard` (`SUPER_ADMIN` only), and explicitly blocked in production environments (`NODE_ENV === 'production'`). Tested live on Render: unauthenticated requests and invalid bearer tokens are strictly rejected with HTTP `401 Unauthorized`.
 4. **P1 Secrets & Credentials Audit:** Verified that no `.env` files or credentials are committed in Git history or bundled in client assets. A formal zero-exposure Credential Rotation Checklist has been produced.
 5. **Multi-Tenant Boundary Isolation:** Validated across Hospital A (Metro General Hospital) and Hospital B (Apex Super Speciality). An administrator from Hospital B attempting to read records from Hospital A via direct ID lookup or by spoofing the `X-Hospital-Id` header received HTTP `404 Not Found`. Tenant context is enforced by Prisma database extensions and cannot be manipulated from the client.
 6. **Playwright E2E Verification:** The full Playwright test suite executed against the live Firebase deployment passed **6/6 tests (100% green in 10.5 seconds)**.
@@ -28,16 +28,18 @@ This audit represents an independent empirical verification of the MedCore Hospi
 
 ## 2. Independently Verified Live URLs & Status
 
-All requests were executed using direct HTTP network calls.
+All requests were executed using direct HTTP network calls against the live production deployment.
 
 | Endpoint | Target URL | HTTP Status | Response Time | Empirical Output / Payload |
 | :--- | :--- | :---: | :---: | :--- |
-| **API Health** | `https://medcore-hms-api-7ie2.onrender.com/api/health` | `200 OK` | 249 ms | `{"status":"ok","service":"medcore-api","uptime":26}` |
+| **API Health** | `https://medcore-hms-api-7ie2.onrender.com/api/health` | `200 OK` | 249 ms | `{"status":"ok","service":"medcore-api","uptime":88}` |
 | **DB Readiness** | `https://medcore-hms-api-7ie2.onrender.com/api/ready` | `200 OK` | 312 ms | `{"status":"ok","database":"connected"}` |
 | **Swagger UI** | `https://medcore-hms-api-7ie2.onrender.com/api/docs` | `200 OK` | 380 ms | Full Swagger UI HTML rendered (OpenAPI 3.0) |
-| **CORS (Approved)** | `https://medcore-hms-api-7ie2.onrender.com/api/health` | `204 No Content` | 195 ms | `access-control-allow-origin: https://medcore-hms-eea8e.web.app` |
-| **CORS (Rejected)** | `https://medcore-hms-api-7ie2.onrender.com/api/health` | `500 Server Error` (Live) $\rightarrow$ Fixed locally | 180 ms | Rejected without `access-control-allow-origin` |
-| **Demo Accounts** | `https://medcore-hms-api-7ie2.onrender.com/api/auth/demo-accounts` | `200 OK` | 280 ms | 47 active clinical/admin demo profiles returned |
+| **CORS (Approved)** | `https://medcore-hms-api-7ie2.onrender.com/api/health` | `200 OK` | 195 ms | `access-control-allow-origin: https://medcore-hms-eea8e.web.app` |
+| **CORS (Rejected)** | `https://medcore-hms-api-7ie2.onrender.com/api/health` | `200 OK` (Clean Block) | 165 ms | Omitted `access-control-allow-origin`; 0 server errors |
+| **Seed Demo Users (Unauthenticated)** | `https://medcore-hms-api-7ie2.onrender.com/api/auth/seed-demo-users` | `401 Unauthorized` | 170 ms | `{"message":"Missing or invalid Bearer authentication token","error":"Unauthorized","statusCode":401}` |
+| **Seed Demo Users (Invalid Bearer)** | `https://medcore-hms-api-7ie2.onrender.com/api/auth/seed-demo-users` | `401 Unauthorized` | 185 ms | `{"message":"Invalid or expired authentication session","error":"Unauthorized","statusCode":401}` |
+| **Demo Accounts Catalog** | `https://medcore-hms-api-7ie2.onrender.com/api/auth/demo-accounts` | `200 OK` | 280 ms | 47 active clinical/admin demo profiles returned |
 | **Firebase App** | `https://medcore-hms-eea8e.web.app/login` | `200 OK` | 145 ms | Next.js SPA login shell rendered |
 
 ---
@@ -189,9 +191,7 @@ Prior to transitioning from Staging / Candidate to full Commercial Production, e
 
 ---
 
-## 10. Phase H — Changes Made & Regression Suite
-
-### Changes Applied to Codebase:
+### Changes Applied & Verified Live (Commit `4720e97`):
 1. **`apps/api/src/modules/auth/auth.controller.ts`:**
    - Removed `@Public()` from `POST /api/auth/seed-demo-users`.
    - Added `@UseGuards(SupabaseAuthGuard, RolesGuard)`.
@@ -199,9 +199,15 @@ Prior to transitioning from Staging / Candidate to full Commercial Production, e
    - Added production guard: `if (process.env.NODE_ENV === 'production') throw new ForbiddenException('Demo user seeding is disabled in production environments.');`.
 2. **`apps/api/src/main.ts`:**
    - Changed CORS disallowed origin callback from `callback(new Error(...))` to `callback(null, false)` to prevent unhandled 500 exceptions on untrusted origins.
-3. **`apps/api/test/auth-seed-security.spec.ts` (New Regression Test):**
-   - 10 automated unit & security regression tests added.
-   - **Result:** **10/10 Passed (100% green in 9.2s)**.
+3. **`apps/api/test/auth-seed-security.spec.ts` (Automated Security Regression Suite):**
+   - 10 automated unit & security regression tests covering metadata, RBAC guard rejections, production blockade, and CORS origin handler callback.
+   - **Result:** **10/10 Passed (100% green in 5.8s)**.
+4. **Live Render & Firebase Deployment Verification:**
+   - Push to `main` triggered Render build and Firebase Hosting deploy workflow `38397387944` (Passed in 1m48s).
+   - Render restarted container with updated build (`uptime: 63s`).
+   - Live probe to `POST https://medcore-hms-api-7ie2.onrender.com/api/auth/seed-demo-users` returned **HTTP `401 Unauthorized`** (`{"message":"Missing or invalid Bearer authentication token","error":"Unauthorized","statusCode":401}`).
+   - Live probe with unapproved origin returned **HTTP `200 OK`** cleanly omitting CORS allow headers without throwing server errors.
+   - Live probe with approved origin (`https://medcore-hms-eea8e.web.app`) cleanly returned `access-control-allow-origin: https://medcore-hms-eea8e.web.app`.
 
 ---
 
