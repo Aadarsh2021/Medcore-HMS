@@ -37,7 +37,7 @@ test.describe('MedCore HMS — Critical E2E Workflows', () => {
   test('4. Appointment scheduling UI route and booking interface structure', async ({ page }) => {
     await page.goto('/login');
     // Verify system branding and hospital tenancy indicators
-    await expect(page.locator('text=/Hospital Management System|MedCore/i')).toBeVisible();
+    await expect(page.locator('text=/Hospital Management System|MedCore/i').first()).toBeVisible();
   });
 
   test('5. Billing and invoice payment route security boundaries', async ({ page }) => {

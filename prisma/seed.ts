@@ -208,8 +208,53 @@ async function main() {
     },
   });
 
-  // 7. Clinicians (Doctors)
-  console.log('Seeding Doctors...');
+  const deptOrtho = await prisma.department.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      name: 'Orthopedics & Joint Reconstruction',
+      code: 'ORTHO',
+      description: 'Surgical and non-surgical treatment of musculoskeletal conditions and trauma.',
+    },
+  });
+
+  const deptNeuro = await prisma.department.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      name: 'Neurology & Neurosurgery',
+      code: 'NEURO',
+      description: 'Diagnosis and management of brain, spine, and peripheral nerve disorders.',
+    },
+  });
+
+  const deptDerma = await prisma.department.create({
+    data: {
+      hospitalId: hospitalMetro.id,
+      name: 'Dermatology & Cosmetology',
+      code: 'DERMA',
+      description: 'Medical and cosmetic care of skin, hair, and nail conditions.',
+    },
+  });
+
+  const deptApexGeneral = await prisma.department.create({
+    data: {
+      hospitalId: hospitalApex.id,
+      name: 'General Medicine & Family Practice',
+      code: 'APEX-GEN',
+      description: 'Primary healthcare and preventive medicine services.',
+    },
+  });
+
+  const deptApexOrtho = await prisma.department.create({
+    data: {
+      hospitalId: hospitalApex.id,
+      name: 'Orthopedics & Sports Medicine',
+      code: 'APEX-ORTHO',
+      description: 'Treatment of sports injuries and joint arthroscopy.',
+    },
+  });
+
+  // 7. Clinicians (Doctors) — PRD requirement: >= 8 doctors across specialisations
+  console.log('Seeding Doctors (8 total across specialisations)...');
   const userDocSharma = await prisma.user.create({
     data: {
       hospitalId: hospitalMetro.id,
@@ -260,30 +305,127 @@ async function main() {
     },
   });
 
-  // Doctor Availability (Mon to Fri: 09:00 - 13:00 and 14:00 - 17:00)
-  console.log('Seeding Doctor Schedules...');
-  for (let day = 1; day <= 5; day++) {
-    await prisma.doctorAvailability.create({
+  const additionalDoctorDefs = [
+    {
+      email: 'dr.nair@metrogeneral.org',
+      firstName: 'Priya',
+      lastName: 'Nair',
+      phone: '+91 98203 11122',
+      hospitalId: hospitalMetro.id,
+      departmentId: deptPeds.id,
+      specialization: 'Pediatrics & Neonatology',
+      licenseNumber: 'MCI-2014-09923',
+      consultationFee: 700.0,
+      bio: 'Pediatric specialist with expertise in child development and neonatal intensive care.',
+    },
+    {
+      email: 'dr.kapoor@metrogeneral.org',
+      firstName: 'Vikram',
+      lastName: 'Kapoor',
+      phone: '+91 98203 22233',
+      hospitalId: hospitalMetro.id,
+      departmentId: deptOrtho.id,
+      specialization: 'Orthopedic Surgery & Arthroplasty',
+      licenseNumber: 'MCI-2010-06182',
+      consultationFee: 900.0,
+      bio: 'Joint replacement surgeon specializing in minimally invasive knee and hip replacements.',
+    },
+    {
+      email: 'dr.reddy@metrogeneral.org',
+      firstName: 'Sneha',
+      lastName: 'Reddy',
+      phone: '+91 98203 33344',
+      hospitalId: hospitalMetro.id,
+      departmentId: deptNeuro.id,
+      specialization: 'Neurology & Stroke Care',
+      licenseNumber: 'MCI-2015-11204',
+      consultationFee: 1000.0,
+      bio: 'Consultant Neurologist specializing in acute stroke intervention and epilepsy.',
+    },
+    {
+      email: 'dr.verma@metrogeneral.org',
+      firstName: 'Rohan',
+      lastName: 'Verma',
+      phone: '+91 98203 44455',
+      hospitalId: hospitalMetro.id,
+      departmentId: deptDerma.id,
+      specialization: 'Dermatology & Dermatosurgery',
+      licenseNumber: 'MCI-2016-12490',
+      consultationFee: 650.0,
+      bio: 'Dermatologist with clinical expertise in psoriasis, eczema, and dermatosurgical procedures.',
+    },
+    {
+      email: 'dr.joshi@apexhealth.org',
+      firstName: 'Meera',
+      lastName: 'Joshi',
+      phone: '+91 98450 55566',
+      hospitalId: hospitalApex.id,
+      departmentId: deptApexGeneral.id,
+      specialization: 'Family Medicine & Diabetology',
+      licenseNumber: 'KMC-2011-05432',
+      consultationFee: 550.0,
+      bio: 'Senior consultant in family medicine with deep interest in chronic disease lifestyle management.',
+    },
+    {
+      email: 'dr.saxena@apexhealth.org',
+      firstName: 'Arjun',
+      lastName: 'Saxena',
+      phone: '+91 98450 66677',
+      hospitalId: hospitalApex.id,
+      departmentId: deptApexOrtho.id,
+      specialization: 'Sports Medicine & Arthroscopy',
+      licenseNumber: 'KMC-2013-08871',
+      consultationFee: 750.0,
+      bio: 'Orthopedic surgeon focusing on ACL reconstruction, rotator cuff repair, and sports injury recovery.',
+    },
+  ];
+
+  const allDoctors = [docSharma, docMenon];
+
+  for (const d of additionalDoctorDefs) {
+    const userDoc = await prisma.user.create({
       data: {
-        doctorId: docSharma.id,
-        dayOfWeek: day,
-        startTime: '09:00',
-        endTime: '13:00',
-        slotDurationMinutes: 30,
-        maxBookingsPerSlot: 1,
+        hospitalId: d.hospitalId,
+        email: d.email,
+        passwordHash: defaultPasswordHash,
+        role: Role.DOCTOR,
+        firstName: d.firstName,
+        lastName: d.lastName,
+        phone: d.phone,
+        isEmailVerified: true,
       },
     });
 
-    await prisma.doctorAvailability.create({
+    const doc = await prisma.doctor.create({
       data: {
-        doctorId: docMenon.id,
-        dayOfWeek: day,
-        startTime: '10:00',
-        endTime: '15:00',
-        slotDurationMinutes: 30,
-        maxBookingsPerSlot: 1,
+        userId: userDoc.id,
+        hospitalId: d.hospitalId,
+        departmentId: d.departmentId,
+        specialization: d.specialization,
+        licenseNumber: d.licenseNumber,
+        consultationFee: d.consultationFee,
+        bio: d.bio,
       },
     });
+
+    allDoctors.push(doc);
+  }
+
+  // Doctor Availability (Mon to Fri: 09:00 - 13:00)
+  console.log('Seeding Doctor Schedules for all 8 Doctors...');
+  for (const doc of allDoctors) {
+    for (let day = 1; day <= 5; day++) {
+      await prisma.doctorAvailability.create({
+        data: {
+          doctorId: doc.id,
+          dayOfWeek: day,
+          startTime: '09:00',
+          endTime: '13:00',
+          slotDurationMinutes: 30,
+          maxBookingsPerSlot: 1,
+        },
+      });
+    }
   }
 
   // 8. Hospital Staff (Nurse, Receptionist, Lab Tech, Pharmacist, Accountant)
@@ -412,6 +554,79 @@ async function main() {
       allergiesSummary: 'Sulfa Drugs',
     },
   });
+
+  // PRD requirement: >= 30 patients seeded
+  console.log('Seeding 28 Additional Patients (to reach 30 total)...');
+  const allPatients = [patient1, patient2];
+  const patientDataSeeds = [
+    { name: 'Amitabh Sen', gender: Gender.MALE, blood: BloodGroup.A_POSITIVE, dob: '1978-04-12', phone: '+91 98199 00001', allergies: 'Aspirin' },
+    { name: 'Sunita Patil', gender: Gender.FEMALE, blood: BloodGroup.B_POSITIVE, dob: '1985-09-25', phone: '+91 98199 00002', allergies: 'None' },
+    { name: 'Ravi Teja', gender: Gender.MALE, blood: BloodGroup.O_POSITIVE, dob: '1992-01-18', phone: '+91 98199 00003', allergies: 'Ciprofloxacin' },
+    { name: 'Pooja Bhatt', gender: Gender.FEMALE, blood: BloodGroup.AB_POSITIVE, dob: '1990-11-03', phone: '+91 98199 00004', allergies: 'None' },
+    { name: 'Devendra Dave', gender: Gender.MALE, blood: BloodGroup.O_NEGATIVE, dob: '1965-07-29', phone: '+91 98199 00005', allergies: 'Latex' },
+    { name: 'Ankita Ghosh', gender: Gender.FEMALE, blood: BloodGroup.A_NEGATIVE, dob: '1996-03-14', phone: '+91 98199 00006', allergies: 'Ibuprofen' },
+    { name: 'Manish Pandey', gender: Gender.MALE, blood: BloodGroup.B_NEGATIVE, dob: '1988-12-08', phone: '+91 98199 00007', allergies: 'None' },
+    { name: 'Shalini Nair', gender: Gender.FEMALE, blood: BloodGroup.B_POSITIVE, dob: '1994-05-22', phone: '+91 98199 00008', allergies: 'Dust mites' },
+    { name: 'Kiran More', gender: Gender.MALE, blood: BloodGroup.O_POSITIVE, dob: '1973-10-31', phone: '+91 98199 00009', allergies: 'None' },
+    { name: 'Neha Chawla', gender: Gender.FEMALE, blood: BloodGroup.A_POSITIVE, dob: '1998-08-19', phone: '+91 98199 00010', allergies: 'Codeine' },
+    { name: 'Gaurav Singhal', gender: Gender.MALE, blood: BloodGroup.AB_NEGATIVE, dob: '1983-02-15', phone: '+91 98199 00011', allergies: 'None' },
+    { name: 'Deepika Rao', gender: Gender.FEMALE, blood: BloodGroup.O_POSITIVE, dob: '1991-06-27', phone: '+91 98199 00012', allergies: 'None' },
+    { name: 'Siddharth Jain', gender: Gender.MALE, blood: BloodGroup.B_POSITIVE, dob: '1989-09-09', phone: '+91 98199 00013', allergies: 'Paracetamol' },
+    { name: 'Meenakshi Iyer', gender: Gender.FEMALE, blood: BloodGroup.A_POSITIVE, dob: '1970-12-01', phone: '+91 98199 00014', allergies: 'None' },
+    { name: 'Aditya Roy', gender: Gender.MALE, blood: BloodGroup.O_POSITIVE, dob: '1995-04-17', phone: '+91 98199 00015', allergies: 'None' },
+    { name: 'Smriti Mandhana', gender: Gender.FEMALE, blood: BloodGroup.B_POSITIVE, dob: '1996-07-18', phone: '+91 98199 00016', allergies: 'Shellfish' },
+    { name: 'Kunal Kapoor', gender: Gender.MALE, blood: BloodGroup.A_NEGATIVE, dob: '1981-11-23', phone: '+91 98199 00017', allergies: 'None' },
+    { name: 'Swati Deshmukh', gender: Gender.FEMALE, blood: BloodGroup.O_NEGATIVE, dob: '1987-03-30', phone: '+91 98199 00018', allergies: 'Penicillin' },
+    { name: 'Nikhil Chopra', gender: Gender.MALE, blood: BloodGroup.B_POSITIVE, dob: '1979-08-14', phone: '+91 98199 00019', allergies: 'None' },
+    { name: 'Tanvi Shinde', gender: Gender.FEMALE, blood: BloodGroup.A_POSITIVE, dob: '2000-02-10', phone: '+91 98199 00020', allergies: 'None' },
+    { name: 'Varun Dhawan', gender: Gender.MALE, blood: BloodGroup.AB_POSITIVE, dob: '1987-04-24', phone: '+91 98199 00021', allergies: 'Peanuts' },
+    { name: 'Ritu Sen', gender: Gender.FEMALE, blood: BloodGroup.O_POSITIVE, dob: '1993-10-15', phone: '+91 98199 00022', allergies: 'None' },
+    { name: 'Harish Kalyan', gender: Gender.MALE, blood: BloodGroup.B_POSITIVE, dob: '1984-06-29', phone: '+91 98199 00023', allergies: 'None' },
+    { name: 'Ananya Birla', gender: Gender.FEMALE, blood: BloodGroup.A_POSITIVE, dob: '1994-07-17', phone: '+91 98199 00024', allergies: 'None' },
+    { name: 'Sanjay Dutt', gender: Gender.MALE, blood: BloodGroup.O_POSITIVE, dob: '1960-07-29', phone: '+91 98199 00025', allergies: 'Morphine' },
+    { name: 'Bhavna Pandey', gender: Gender.FEMALE, blood: BloodGroup.B_NEGATIVE, dob: '1975-01-20', phone: '+91 98199 00026', allergies: 'None' },
+    { name: 'Chirag Paswan', gender: Gender.MALE, blood: BloodGroup.A_POSITIVE, dob: '1982-10-31', phone: '+91 98199 00027', allergies: 'None' },
+    { name: 'Geeta Phogat', gender: Gender.FEMALE, blood: BloodGroup.O_POSITIVE, dob: '1988-12-15', phone: '+91 98199 00028', allergies: 'None' },
+  ];
+
+  for (let i = 0; i < patientDataSeeds.length; i++) {
+    const item = patientDataSeeds[i];
+    const [firstName, ...rest] = item.name.split(' ');
+    const lastName = rest.join(' ');
+    const uhidNum = (103 + i).toString().padStart(5, '0');
+    const uhid = `METRO-2025-${uhidNum}`;
+    const email = `patient.${firstName.toLowerCase()}.${i + 3}@medcore.demo`;
+
+    const userP = await prisma.user.create({
+      data: {
+        hospitalId: hospitalMetro.id,
+        email,
+        passwordHash: defaultPasswordHash,
+        role: Role.PATIENT,
+        firstName,
+        lastName,
+        phone: item.phone,
+        isEmailVerified: true,
+      },
+    });
+
+    const p = await prisma.patient.create({
+      data: {
+        userId: userP.id,
+        hospitalId: hospitalMetro.id,
+        uhid,
+        dateOfBirth: new Date(item.dob),
+        gender: item.gender,
+        bloodGroup: item.blood,
+        addressId: addrPatient1.id,
+        emergencyContactName: `${lastName} Family`,
+        emergencyContactPhone: item.phone,
+        emergencyContactRelation: 'Family',
+        allergiesSummary: item.allergies,
+      },
+    });
+    allPatients.push(p);
+  }
 
   // 10. Pharmacy: Medicines & Batches (FIFO Inventory)
   console.log('Seeding Pharmacy & Batches...');
@@ -784,6 +999,51 @@ async function main() {
       reason: 'Routine quarterly diabetes and metabolic follow-up.',
     },
   });
+
+  // 13.1 Historical Appointments Spanning 2 Weeks (PRD Requirement)
+  console.log('Seeding 2-Week Historical and Upcoming Appointments (PRD Requirement)...');
+  const baseDate = new Date();
+  const appointmentStatuses = [
+    AppointmentStatus.COMPLETED,
+    AppointmentStatus.COMPLETED,
+    AppointmentStatus.COMPLETED,
+    AppointmentStatus.CONFIRMED,
+    AppointmentStatus.CANCELLED,
+    AppointmentStatus.SCHEDULED,
+  ];
+
+  for (let dayOffset = -14; dayOffset <= 0; dayOffset++) {
+    const apptDate = new Date(baseDate);
+    apptDate.setDate(apptDate.getDate() + dayOffset);
+
+    for (let slot = 0; slot < 2; slot++) {
+      const patientIdx = Math.abs(dayOffset * 2 + slot) % allPatients.length;
+      const doctorIdx = (Math.abs(dayOffset) + slot) % allDoctors.length;
+      const patient = allPatients[patientIdx];
+      const doctor = allDoctors[doctorIdx];
+      const hour = 9 + slot * 2;
+      const startTime = `${hour.toString().padStart(2, '0')}:00`;
+      const endTime = `${hour.toString().padStart(2, '0')}:30`;
+      const status = dayOffset < -2 
+        ? AppointmentStatus.COMPLETED 
+        : appointmentStatuses[Math.abs(dayOffset + slot) % appointmentStatuses.length];
+
+      await prisma.appointment.create({
+        data: {
+          hospitalId: doctor.hospitalId,
+          patientId: patient.id,
+          doctorId: doctor.id,
+          departmentId: doctor.departmentId,
+          appointmentDate: apptDate,
+          startTime,
+          endTime,
+          status,
+          type: AppointmentType.REGULAR,
+          reason: `Follow-up evaluation on Day offset ${dayOffset}`,
+        },
+      });
+    }
+  }
 
   // 14. Inpatient Rooms, Beds & Inpatient Admission
   console.log('Seeding Inpatient Rooms and Beds...');
