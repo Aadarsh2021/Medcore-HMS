@@ -38,16 +38,17 @@ export class JobsWorkerService implements OnModuleInit, OnModuleDestroy {
 
     if (redisUrl) {
       try {
-        const parsed = new URL(redisUrl);
+        const cleanUrl = redisUrl.replace(/^["']|["']$/g, '').trim();
+        const parsed = new URL(cleanUrl);
         const isTls = parsed.protocol === 'rediss:';
         this.connection = {
           host: parsed.hostname,
-          port: parsed.port ? Number(parsed.port) : (isTls ? 6380 : 6379),
+          port: parsed.port ? Number(parsed.port) : 6379,
           username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
           password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
           tls: isTls ? { rejectUnauthorized: false } : undefined,
           maxRetriesPerRequest: null,
-          connectTimeout: 2000,
+          connectTimeout: 10000,
         };
       } catch (err: any) {
         this.logger.error(`Invalid REDIS_URL in worker: ${err.message}. Falling back to default host/port.`);
@@ -56,7 +57,7 @@ export class JobsWorkerService implements OnModuleInit, OnModuleDestroy {
           port: this.configService.get<number>('REDIS_PORT', 6379),
           password: this.configService.get<string>('REDIS_PASSWORD', undefined) || undefined,
           maxRetriesPerRequest: null,
-          connectTimeout: 2000,
+          connectTimeout: 10000,
         };
       }
     } else {
@@ -65,7 +66,7 @@ export class JobsWorkerService implements OnModuleInit, OnModuleDestroy {
         port: this.configService.get<number>('REDIS_PORT', 6379),
         password: this.configService.get<string>('REDIS_PASSWORD', undefined) || undefined,
         maxRetriesPerRequest: null,
-        connectTimeout: 2000,
+        connectTimeout: 10000,
       };
     }
   }

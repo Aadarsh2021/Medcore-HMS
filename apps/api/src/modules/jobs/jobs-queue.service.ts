@@ -34,16 +34,17 @@ export class JobsQueueService implements OnModuleDestroy {
 
     if (redisUrl) {
       try {
-        const parsed = new URL(redisUrl);
+        const cleanUrl = redisUrl.replace(/^["']|["']$/g, '').trim();
+        const parsed = new URL(cleanUrl);
         const isTls = parsed.protocol === 'rediss:';
         connection = {
           host: parsed.hostname,
-          port: parsed.port ? Number(parsed.port) : (isTls ? 6380 : 6379),
+          port: parsed.port ? Number(parsed.port) : 6379,
           username: parsed.username ? decodeURIComponent(parsed.username) : undefined,
           password: parsed.password ? decodeURIComponent(parsed.password) : undefined,
           tls: isTls ? { rejectUnauthorized: false } : undefined,
           maxRetriesPerRequest: null,
-          connectTimeout: 2000,
+          connectTimeout: 10000,
         };
       } catch (err: any) {
         this.logger.error(`Invalid REDIS_URL format: ${err.message}. Falling back to individual host/port configs.`);
@@ -52,7 +53,7 @@ export class JobsQueueService implements OnModuleDestroy {
           port: this.configService.get<number>('REDIS_PORT', 6379),
           password: this.configService.get<string>('REDIS_PASSWORD', undefined) || undefined,
           maxRetriesPerRequest: null,
-          connectTimeout: 2000,
+          connectTimeout: 10000,
         };
       }
     } else {
@@ -61,7 +62,7 @@ export class JobsQueueService implements OnModuleDestroy {
         port: this.configService.get<number>('REDIS_PORT', 6379),
         password: this.configService.get<string>('REDIS_PASSWORD', undefined) || undefined,
         maxRetriesPerRequest: null,
-        connectTimeout: 2000,
+        connectTimeout: 10000,
       };
     }
 
@@ -90,7 +91,6 @@ export class JobsQueueService implements OnModuleDestroy {
       defaultJobOptions,
     });
 
-    // Error handlers to prevent unhandled Redis connection crashes
     this.scansQueue.on('error', (err) => {
       this.isRedisHealthy = false;
       this.logger.warn(`BullMQ scans queue connection warning: ${err.message}`);
@@ -119,7 +119,7 @@ export class JobsQueueService implements OnModuleDestroy {
   }
 
   /**
-   * Safe queue addition with bounded timeout (defaults to 3000ms).
+   * Safe queue addition with bounded timeout (defaults to 5000ms).
    * Prevents HTTP requests from hanging indefinitely when Redis is unprovisioned or unreachable.
    */
   async addWithTimeout(
@@ -127,14 +127,8 @@ export class JobsQueueService implements OnModuleDestroy {
     name: string,
     payload: any,
     opts?: any,
-    timeoutMs = 3000,
+    timeoutMs = 5000,
   ): Promise<any> {
-    if (!this.isRedisHealthy) {
-      throw new ServiceUnavailableException(
-        'Background queue service (Redis) is currently unreachable. Configure REDIS_URL or use synchronous endpoints.',
-      );
-    }
-
     let timeoutId: NodeJS.Timeout;
     const timeoutPromise = new Promise((_, reject) => {
       timeoutId = setTimeout(() => {
@@ -159,6 +153,7 @@ export class JobsQueueService implements OnModuleDestroy {
         timeoutPromise,
       ]);
       clearTimeout(timeoutId!);
+      this.isRedisHealthy = true;
       return job;
     } catch (err: any) {
       clearTimeout(timeoutId!);
