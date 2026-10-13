@@ -9,7 +9,8 @@ allowBuilds:
   '@scarf/scarf': true
   bcrypt: true
   esbuild: true
-  msgpackr-extract: set this to true or false
+  msgpackr-extract: true
   prisma: true
   protobufjs: true
   sharp: true
+  unrs-resolver: true

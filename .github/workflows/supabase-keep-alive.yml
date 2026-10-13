@@ -17,7 +17,6 @@ jobs:
           echo "Sending HTTP query to Supabase PostgREST Gateway..."
           STATUS=$(curl -s --retry 3 --retry-delay 2 -o /dev/null -w "%{http_code}" \
             -H "apikey: sb_publishable_4PWubQVpA5UHZMVJfmHHgA_HP0qBw9S" \
-            -H "Authorization: Bearer sb_publishable_4PWubQVpA5UHZMVJfmHHgA_HP0qBw9S" \
             "https://ihpjezapyznhzbhxfrvu.supabase.co/rest/v1/Hospital?select=id&limit=1" || echo "000")
           echo "Supabase PostgREST HTTP Code: $STATUS"
           if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
