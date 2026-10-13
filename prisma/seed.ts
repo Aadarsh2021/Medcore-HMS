@@ -1018,9 +1018,9 @@ async function main() {
 
     for (let slot = 0; slot < 2; slot++) {
       const patientIdx = Math.abs(dayOffset * 2 + slot) % allPatients.length;
-      const doctorIdx = (Math.abs(dayOffset) + slot) % allDoctors.length;
       const patient = allPatients[patientIdx];
-      const doctor = allDoctors[doctorIdx];
+      const hospitalDoctors = allDoctors.filter((d) => d.hospitalId === patient.hospitalId);
+      const doctor = hospitalDoctors[(Math.abs(dayOffset) + slot) % hospitalDoctors.length];
       const hour = 9 + slot * 2;
       const startTime = `${hour.toString().padStart(2, '0')}:00`;
       const endTime = `${hour.toString().padStart(2, '0')}:30`;
@@ -1030,7 +1030,7 @@ async function main() {
 
       await prisma.appointment.create({
         data: {
-          hospitalId: doctor.hospitalId,
+          hospitalId: patient.hospitalId,
           patientId: patient.id,
           doctorId: doctor.id,
           departmentId: doctor.departmentId,

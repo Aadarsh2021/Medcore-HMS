@@ -129,7 +129,7 @@ describe('Phase 14 & Phase 18 — Patient Portal IDOR & Rate Limiting Security S
 
     it('3. should reject Patient A attempting to query Patient B appointment record', async () => {
       const apptB = await prisma.raw.appointment.findFirst({
-        where: { patientId: patientB.id },
+        where: { patientId: patientB.id, hospitalId: hospitalAId },
       });
 
       if (apptB) {
