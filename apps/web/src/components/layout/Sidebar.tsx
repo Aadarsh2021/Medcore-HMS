@@ -249,6 +249,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
           const isActive =
             pathname === item.href ||
             (item.href !== '/dashboard' && pathname.startsWith(item.href));
+          const label = item.href === '/dashboard/billing' && role === UserRole.PATIENT ? 'My Invoices' : item.label;
 
           return (
             <Link
@@ -260,12 +261,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   ? 'bg-teal-600 text-white shadow-sm font-semibold'
                   : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
               }`}
-              title={isCollapsed ? item.label : undefined}
+              title={isCollapsed ? label : undefined}
             >
               <Icon className="w-5 h-5 shrink-0" />
               {!isCollapsed && (
                 <div className="flex items-center justify-between flex-1 truncate">
-                  <span className="truncate">{item.label}</span>
+                  <span className="truncate">{label}</span>
                   {item.badge && (
                     <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-teal-800/80 text-teal-200 border border-teal-600/40">
                       {item.badge}

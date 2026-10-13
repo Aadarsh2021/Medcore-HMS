@@ -11,6 +11,8 @@ import {
   Req,
   BadRequestException,
   UnauthorizedException,
+  ForbiddenException,
+  NotFoundException,
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
@@ -173,7 +175,26 @@ export class BillingController {
     @Param('patientId') patientId: string,
   ) {
     const hospitalId = req.user?.hospitalId || headerHospitalId;
-    return this.billingService.getInvoices(hospitalId, { patientId });
+    let targetPatientId = patientId;
+
+    if (patientId === 'me') {
+      if (req.user?.role === UserRole.PATIENT) {
+        targetPatientId = req.user?.patientProfile?.id;
+        if (!targetPatientId) {
+          throw new NotFoundException('Patient profile not found for authenticated user');
+        }
+      } else {
+        throw new BadRequestException('Only authenticated patients may use the "me" identifier');
+      }
+    } else if (req.user?.role === UserRole.PATIENT) {
+      const ownPatientId = req.user?.patientProfile?.id;
+      if (!ownPatientId || ownPatientId !== patientId) {
+        throw new ForbiddenException('Access denied: Patients may only view their own invoices');
+      }
+      targetPatientId = ownPatientId;
+    }
+
+    return this.billingService.getInvoices(hospitalId, { patientId: targetPatientId });
   }
 
   @Get('reports/summary')

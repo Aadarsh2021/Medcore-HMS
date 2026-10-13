@@ -14,11 +14,23 @@ import { RolesGuard } from '../../modules/auth/guards/roles.guard';
 import { CurrentUser } from '../../modules/auth/decorators/current-user.decorator';
 import { PrismaService } from '../../database/prisma.service';
 import { UserRole } from '@medcore/types';
+import { IsNotEmpty, IsNumber, IsString, Min } from 'class-validator';
 
 export class PresignedUploadDto {
+  @IsString()
+  @IsNotEmpty()
   filename!: string;
+
+  @IsString()
+  @IsNotEmpty()
   mimetype!: string;
+
+  @IsNumber()
+  @Min(1)
   size!: number;
+
+  @IsString()
+  @IsNotEmpty()
   patientId!: string;
 }
 

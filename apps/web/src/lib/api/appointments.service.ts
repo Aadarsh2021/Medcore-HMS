@@ -229,8 +229,14 @@ export const appointmentsService = {
         const items = Array.isArray(res.data) ? res.data : res.data.items || [];
         return { items, total: res.data.total || items.length };
       }
-    } catch {
-      // Offline fallback
+    } catch (err: any) {
+      if (err instanceof ApiError && (err.isUnauthorized || err.isForbidden)) {
+        throw err;
+      }
+      if (err instanceof ApiError && !err.isNetworkError) {
+        throw err;
+      }
+      // Offline fallback only for true network disconnect
     }
 
     let items = [...FALLBACK_APPOINTMENTS];

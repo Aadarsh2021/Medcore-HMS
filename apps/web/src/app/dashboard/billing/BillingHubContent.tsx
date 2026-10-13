@@ -27,16 +27,25 @@ import {
   InvoiceRecord,
   PaymentTransaction,
 } from '../../../lib/api/billing.service';
+import { useAuthStore } from '../../../stores/authStore';
+import { UserRole } from '@medcore/types';
+import { ApiError } from '../../../lib/api/client';
+import { ErrorState } from '../../../components/ui/ErrorState';
+import { EmptyState } from '../../../components/ui/EmptyState';
 
 export function BillingHubContent({ defaultTab = 'invoices' }: { defaultTab?: string }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialInvoiceId = searchParams.get('id');
 
+  const { user } = useAuthStore();
+  const isPatient = user?.role === UserRole.PATIENT;
+
   const [invoices, setInvoices] = useState<InvoiceRecord[]>([]);
   const [activeTab, setActiveTab] = useState(defaultTab);
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Selected Invoice Detail Drawer State
   const [selectedInvoice, setSelectedInvoice] = useState<InvoiceRecord | null>(null);
@@ -49,28 +58,41 @@ export function BillingHubContent({ defaultTab = 'invoices' }: { defaultTab?: st
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [lastReceipt, setLastReceipt] = useState<{ txn: string; rcp: string } | null>(null);
 
-  useEffect(() => {
-    async function loadInvoices() {
-      setIsLoading(true);
-      try {
-        const data = await billingService.getInvoices();
-        setInvoices(data);
-        if (initialInvoiceId) {
-          const found = data.find((i) => i.id === initialInvoiceId);
-          if (found) setSelectedInvoice(found);
-        }
-      } finally {
-        setIsLoading(false);
+  const loadInvoices = React.useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const data = isPatient
+        ? await billingService.getPatientInvoices('me')
+        : await billingService.getInvoices();
+      setInvoices(data);
+      if (initialInvoiceId) {
+        const found = data.find((i) => i.id === initialInvoiceId);
+        if (found) setSelectedInvoice(found);
       }
+    } catch (err: any) {
+      if (err instanceof ApiError && err.isForbidden) {
+        setError('Access denied: Your account is not authorized to view institutional cashier ledgers.');
+      } else if (err instanceof ApiError && err.isUnauthorized) {
+        setError('Your session has expired. Please log in again to access billing records.');
+      } else {
+        setError(err.message || 'Unable to load billing records.');
+      }
+    } finally {
+      setIsLoading(false);
     }
+  }, [isPatient, initialInvoiceId]);
+
+  useEffect(() => {
     loadInvoices();
-  }, [initialInvoiceId]);
+  }, [loadInvoices]);
 
   const openInvoiceDetail = (inv: InvoiceRecord) => {
     setSelectedInvoice(inv);
   };
 
   const openPaymentModal = (inv: InvoiceRecord) => {
+    if (isPatient) return;
     setSelectedInvoice(inv);
     setPaymentAmount(inv.balanceDue);
     setPaymentRef('');
@@ -127,20 +149,45 @@ export function BillingHubContent({ defaultTab = 'invoices' }: { defaultTab?: st
     { id: 'insurance', label: 'Insurance / TPA Claims', count: invoices.filter((i) => i.insurance).length },
   ];
 
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          breadcrumbs={[{ label: 'Billing', href: '/dashboard/billing' }]}
+          title={isPatient ? 'My Invoices & Billing Statements' : 'Patient Billing, Invoices & Cashier Desk'}
+          description={isPatient ? 'Itemized clinical and pharmacy statements' : 'Consolidated consultation, diagnostic lab, procedure, and pharmacy itemized billing'}
+        />
+        <ErrorState
+          title={error.includes('Access denied') ? 'Workstation Access Restricted' : 'Unable to Load Billing Data'}
+          message={error}
+          onRetry={loadInvoices}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader
-        breadcrumbs={[{ label: 'Billing & Cashier', href: '/dashboard/billing' }]}
-        title="Patient Billing, Invoices & Cashier Desk"
-        description="Consolidated consultation, diagnostic lab, procedure, and pharmacy itemized billing"
+        breadcrumbs={[{ label: isPatient ? 'My Invoices' : 'Billing & Cashier', href: '/dashboard/billing' }]}
+        title={isPatient ? 'My Invoices & Billing Statements' : 'Patient Billing, Invoices & Cashier Desk'}
+        description={
+          isPatient
+            ? 'Itemized consultation fees, pharmacy charges, diagnostic tests, and official hospital receipts'
+            : 'Consolidated consultation, diagnostic lab, procedure, and pharmacy itemized billing'
+        }
       />
 
-      {/* Honest State Notice */}
+      {/* State Notice */}
       <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-900/60 text-amber-900 dark:text-amber-200 text-xs flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Receipt className="w-4 h-4 text-amber-600 shrink-0" />
           <span>
-            <strong>Payment Integration Pending:</strong> Consolidated invoice itemization and cashier receipts active in adapter mode. Real merchant gateway processing will activate upon Phase 8 backend release.
+            {isPatient ? (
+              <strong>Payment Gateway Notice: Online payment integration will activate upon Phase 8 release. Hospital cashier counter settlements are reflected in real time below.</strong>
+            ) : (
+              <strong>Payment Integration Pending: Consolidated invoice itemization and cashier receipts active in adapter mode. Real merchant gateway processing will activate upon Phase 8 backend release.</strong>
+            )}
           </span>
         </div>
         <span className="font-mono text-[11px] bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100 px-2.5 py-0.5 rounded font-bold uppercase tracking-wider">
@@ -151,20 +198,20 @@ export function BillingHubContent({ defaultTab = 'invoices' }: { defaultTab?: st
       {/* Financial Overview KPIs */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
-          title="Total Invoices"
+          title={isPatient ? 'My Invoices' : 'Total Invoices'}
           value={invoices.length}
-          subtitle="Consultation & care charges"
+          subtitle={isPatient ? 'Consultation & care charges' : 'Hospital-wide invoices'}
           icon={<FileText className="w-5 h-5" />}
         />
         <StatCard
           title="Outstanding Balance"
           value={`₹${totalOutstanding.toLocaleString()}`}
-          subtitle="Pending collection"
+          subtitle={isPatient ? 'Due for settlement' : 'Pending collection'}
           icon={<Clock className="w-5 h-5" />}
           trend={{ label: 'Unpaid', positive: false }}
         />
         <StatCard
-          title="Total Collections"
+          title={isPatient ? 'Settled to Date' : 'Total Collections'}
           value={`₹${totalCollected.toLocaleString()}`}
           subtitle="Cash, UPI & Card settled"
           icon={<CreditCard className="w-5 h-5" />}
@@ -172,8 +219,8 @@ export function BillingHubContent({ defaultTab = 'invoices' }: { defaultTab?: st
         />
         <StatCard
           title="Insurance Pre-Auth"
-          value="1 Claim"
-          subtitle="Approved by Star Health TPA"
+          value={`${invoices.filter((i) => i.insurance).length} Claim(s)`}
+          subtitle="TPA pre-authorized status"
           icon={<ShieldCheck className="w-5 h-5" />}
           trend={{ label: 'Approved', positive: true }}
         />
@@ -184,74 +231,93 @@ export function BillingHubContent({ defaultTab = 'invoices' }: { defaultTab?: st
       {/* Invoices List Table */}
       <Card>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs sm:text-sm border-collapse">
-              <thead>
-                <tr className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-semibold">
-                  <th className="py-3 px-4">Invoice Number</th>
-                  <th className="py-3 px-4">Patient (UHID)</th>
-                  <th className="py-3 px-4">Department / Doctor</th>
-                  <th className="py-3 px-4">Bill Amount</th>
-                  <th className="py-3 px-4">Paid Amount</th>
-                  <th className="py-3 px-4">Balance Due</th>
-                  <th className="py-3 px-4">Status</th>
-                  <th className="py-3 px-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {filteredInvoices.map((inv) => (
-                  <tr key={inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
-                    <td className="py-3.5 px-4 font-mono font-bold text-teal-600">
-                      {inv.invoiceNumber}
-                      <div className="text-[11px] font-normal text-slate-400">
-                        {new Date(inv.issuedAt).toLocaleDateString()}
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <div className="font-semibold text-slate-900 dark:text-white">
-                        {inv.patientName}
-                      </div>
-                      <div className="text-xs font-mono text-slate-500">{inv.patientUhid}</div>
-                    </td>
-                    <td className="py-3.5 px-4">
-                      <div>{inv.departmentName || 'Outpatient'}</div>
-                      <div className="text-xs text-slate-500">{inv.doctorName}</div>
-                    </td>
-                    <td className="py-3.5 px-4 font-mono font-bold">₹{inv.totalAmount}</td>
-                    <td className="py-3.5 px-4 font-mono text-emerald-600 font-semibold">
-                      ₹{inv.paidAmount}
-                    </td>
-                    <td className="py-3.5 px-4 font-mono font-bold text-rose-600">
-                      ₹{inv.balanceDue}
-                    </td>
-                    <td className="py-3.5 px-4">{getStatusBadge(inv.status)}</td>
-                    <td className="py-3.5 px-4 text-right">
-                      <div className="flex items-center justify-end gap-1.5">
-                        {inv.balanceDue > 0 && (
-                          <Button
-                            variant="clinical"
-                            size="sm"
-                            leftIcon={<CreditCard className="w-3.5 h-3.5" />}
-                            onClick={() => openPaymentModal(inv)}
-                          >
-                            Collect
-                          </Button>
-                        )}
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          leftIcon={<Eye className="w-3.5 h-3.5" />}
-                          onClick={() => openInvoiceDetail(inv)}
-                        >
-                          Details
-                        </Button>
-                      </div>
-                    </td>
+          {isLoading ? (
+            <div className="p-12 text-center text-xs text-slate-500">
+              Loading billing statements...
+            </div>
+          ) : filteredInvoices.length === 0 ? (
+            <div className="py-12">
+              <EmptyState
+                title="No billing statements found"
+                description={
+                  isPatient
+                    ? 'You have no outstanding or settled invoices recorded at this hospital.'
+                    : 'No invoices match the selected filter criteria.'
+                }
+              />
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs sm:text-sm border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 text-slate-600 dark:text-slate-400 font-semibold">
+                    <th className="py-3 px-4">Invoice Number</th>
+                    {!isPatient && <th className="py-3 px-4">Patient (UHID)</th>}
+                    <th className="py-3 px-4">Department / Doctor</th>
+                    <th className="py-3 px-4">Bill Amount</th>
+                    <th className="py-3 px-4">Paid Amount</th>
+                    <th className="py-3 px-4">Balance Due</th>
+                    <th className="py-3 px-4">Status</th>
+                    <th className="py-3 px-4 text-right">Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                  {filteredInvoices.map((inv) => (
+                    <tr key={inv.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40">
+                      <td className="py-3.5 px-4 font-mono font-bold text-teal-600">
+                        {inv.invoiceNumber}
+                        <div className="text-[11px] font-normal text-slate-400">
+                          {new Date(inv.issuedAt).toLocaleDateString()}
+                        </div>
+                      </td>
+                      {!isPatient && (
+                        <td className="py-3.5 px-4">
+                          <div className="font-semibold text-slate-900 dark:text-white">
+                            {inv.patientName}
+                          </div>
+                          <div className="text-xs font-mono text-slate-500">{inv.patientUhid}</div>
+                        </td>
+                      )}
+                      <td className="py-3.5 px-4">
+                        <div>{inv.departmentName || 'Outpatient'}</div>
+                        <div className="text-xs text-slate-500">{inv.doctorName}</div>
+                      </td>
+                      <td className="py-3.5 px-4 font-mono font-bold">₹{inv.totalAmount}</td>
+                      <td className="py-3.5 px-4 font-mono text-emerald-600 font-semibold">
+                        ₹{inv.paidAmount}
+                      </td>
+                      <td className="py-3.5 px-4 font-mono font-bold text-rose-600">
+                        ₹{inv.balanceDue}
+                      </td>
+                      <td className="py-3.5 px-4">{getStatusBadge(inv.status)}</td>
+                      <td className="py-3.5 px-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5">
+                          {!isPatient && inv.balanceDue > 0 && (
+                            <Button
+                              variant="clinical"
+                              size="sm"
+                              leftIcon={<CreditCard className="w-3.5 h-3.5" />}
+                              onClick={() => openPaymentModal(inv)}
+                            >
+                              Collect
+                            </Button>
+                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            leftIcon={<Eye className="w-3.5 h-3.5" />}
+                            onClick={() => openInvoiceDetail(inv)}
+                          >
+                            Details
+                          </Button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -275,7 +341,7 @@ export function BillingHubContent({ defaultTab = 'invoices' }: { defaultTab?: st
                 <Button variant="outline" size="sm" leftIcon={<Printer className="w-3.5 h-3.5" />} onClick={() => window.print()}>
                   Print Statement
                 </Button>
-                {selectedInvoice.balanceDue > 0 && (
+                {!isPatient && selectedInvoice.balanceDue > 0 && (
                   <Button
                     variant="clinical"
                     size="sm"

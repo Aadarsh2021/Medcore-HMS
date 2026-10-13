@@ -43,7 +43,7 @@ import { useRealtime } from '../../hooks/useRealtime';
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { user } = useAuthStore();
+  const { user, isInitialized } = useAuthStore();
   const { isConnected, lastCriticalAlert, lastBedUpdate, clearCriticalAlert } = useRealtime();
   const [appointments, setAppointments] = useState<AppointmentRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -57,16 +57,19 @@ export default function DashboardPage() {
   }, [user?.role]);
 
   useEffect(() => {
+    if (!isInitialized) return;
     async function loadData() {
       try {
         const aptRes = await appointmentsService.list();
         setAppointments(aptRes.items);
+      } catch {
+        // Handled gracefully without uncaught rejection
       } finally {
         setIsLoading(false);
       }
     }
     loadData();
-  }, []);
+  }, [isInitialized]);
 
   const todayFormatted = new Intl.DateTimeFormat('en-US', {
     weekday: 'long',

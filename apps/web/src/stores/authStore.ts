@@ -125,7 +125,12 @@ async function fetchProfile(
       if (res.ok) {
         const json = await res.json();
         if (json.data?.user) {
-          set({ user: json.data.user });
+          set({
+            user: {
+              ...json.data.user,
+              patientId: json.data?.details?.patientProfile?.id,
+            },
+          });
           return;
         }
       }

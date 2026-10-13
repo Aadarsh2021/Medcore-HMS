@@ -7,6 +7,7 @@
  */
 
 import { useAuthStore } from '../../stores/authStore';
+import { getSupabaseBrowserClient } from '../supabase/client';
 
 /**
  * Resolves the backend API base URL.
@@ -30,6 +31,7 @@ export function getApiBaseUrl(): string {
 export interface ApiRequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
   hospitalOverrideId?: string | null;
+  _isRetry?: boolean;
 }
 
 export interface ApiResponse<T = any> {
@@ -87,7 +89,7 @@ export async function apiClient<T = any>(
   endpoint: string,
   options: ApiRequestOptions = {},
 ): Promise<ApiResponse<T>> {
-  const { params, hospitalOverrideId, headers: customHeaders, ...fetchOptions } = options;
+  const { params, hospitalOverrideId, headers: customHeaders, _isRetry, ...fetchOptions } = options;
 
   const baseUrl = getApiBaseUrl();
   let url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
@@ -111,9 +113,35 @@ export async function apiClient<T = any>(
     headers.set('Content-Type', 'application/json');
   }
 
-  // Inject Supabase session access token
-  const authState = useAuthStore.getState();
-  const token = authState.session?.access_token;
+  // 1. Resolve token from Zustand store or proactively from Supabase client
+  let authState = useAuthStore.getState();
+  let token = authState.session?.access_token;
+
+  if (typeof window !== 'undefined') {
+    try {
+      const supabase = getSupabaseBrowserClient();
+      // If store has no token, fetch current session from browser storage/cookies
+      if (!token) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          token = session.access_token;
+          useAuthStore.setState({ session });
+          authState = useAuthStore.getState();
+        }
+      } else if (authState.session?.expires_at && authState.session.expires_at * 1000 < Date.now() + 5000) {
+        // Token is expired or expiring in <= 5s: refresh proactively
+        const { data: { session: refreshedSession } } = await supabase.auth.refreshSession();
+        if (refreshedSession?.access_token) {
+          token = refreshedSession.access_token;
+          useAuthStore.setState({ session: refreshedSession });
+          authState = useAuthStore.getState();
+        }
+      }
+    } catch {
+      // Proactive session extraction failed; proceed with existing state
+    }
+  }
+
   if (token && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${token}`);
   }
@@ -129,6 +157,24 @@ export async function apiClient<T = any>(
       ...fetchOptions,
       headers,
     });
+
+    // 2. Handle 401 Unauthorized with a single automatic token refresh & retry
+    if (res.status === 401 && !_isRetry && typeof window !== 'undefined') {
+      try {
+        const supabase = getSupabaseBrowserClient();
+        const { data: { session: refreshedSession }, error: refreshErr } = await supabase.auth.refreshSession();
+        if (!refreshErr && refreshedSession?.access_token) {
+          useAuthStore.setState({ session: refreshedSession });
+          // Retry the request exactly once with the refreshed token
+          return await apiClient<T>(endpoint, {
+            ...options,
+            _isRetry: true,
+          });
+        }
+      } catch {
+        // Refresh failed; proceed to throw standard 401 ApiError
+      }
+    }
 
     if (res.status === 204) {
       return { success: true };

@@ -123,13 +123,34 @@ function mapApiInvoiceToRecord(inv: any): InvoiceRecord {
 
 export const billingService = {
   /**
-   * Retrieves invoices list from NestJS API.
+   * Retrieves invoices list from NestJS API (Staff Ledger).
    */
   async getInvoices(query?: { status?: string; search?: string }): Promise<InvoiceRecord[]> {
     try {
       const res = await apiClient<{ items: any[]; total: number }>('/billing/invoices', {
         params: query,
       });
+      if (res.data?.items) {
+        return res.data.items.map(mapApiInvoiceToRecord);
+      }
+      return [];
+    } catch (err: any) {
+      if (typeof window === 'undefined') {
+        return [];
+      }
+      throw err;
+    }
+  },
+
+  /**
+   * Retrieves patient-scoped invoices from NestJS API.
+   * For PATIENT role, defaults to 'me' which resolves to the authenticated user's patient profile.
+   */
+  async getPatientInvoices(patientId: string = 'me'): Promise<InvoiceRecord[]> {
+    try {
+      const res = await apiClient<{ items: any[]; total: number }>(
+        `/billing/patients/${patientId}/invoices`,
+      );
       if (res.data?.items) {
         return res.data.items.map(mapApiInvoiceToRecord);
       }

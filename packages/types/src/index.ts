@@ -258,6 +258,7 @@ export interface AuthSessionUser {
   lastName: string;
   phone?: string;
   avatarUrl?: string;
+  patientId?: string;
 }
 
 export interface AuthTokens {

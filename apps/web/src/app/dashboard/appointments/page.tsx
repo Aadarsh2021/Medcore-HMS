@@ -9,25 +9,44 @@ import { Button } from '../../../components/ui/Button';
 import { Badge } from '../../../components/ui/Badge';
 import { Calendar, Plus, Clock, User, Stethoscope, ArrowRight, Eye } from 'lucide-react';
 import { appointmentsService, AppointmentRecord } from '../../../lib/api/appointments.service';
-import { AppointmentStatus } from '@medcore/types';
+import { AppointmentStatus, UserRole } from '@medcore/types';
+import { useAuthStore } from '../../../stores/authStore';
+import { ApiError } from '../../../lib/api/client';
+import { ErrorState } from '../../../components/ui/ErrorState';
 
 export default function AppointmentsListPage() {
   const router = useRouter();
+  const { user, isInitialized } = useAuthStore();
+  const isPatient = user?.role === UserRole.PATIENT;
+
   const [appointments, setAppointments] = useState<AppointmentRecord[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
-  useEffect(() => {
-    async function loadAppointments() {
-      try {
-        const res = await appointmentsService.list();
-        setAppointments(res.items);
-      } finally {
-        setIsLoading(false);
+  const loadAppointments = async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const res = await appointmentsService.list();
+      setAppointments(res.items);
+    } catch (err: any) {
+      if (err instanceof ApiError && err.isForbidden) {
+        setError('Access denied: You are not authorized to view these appointments.');
+      } else if (err instanceof ApiError && err.isUnauthorized) {
+        setError('Your session has expired. Please log in again.');
+      } else {
+        setError(err.message || 'Failed to load appointment schedule.');
       }
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  useEffect(() => {
+    if (!isInitialized) return;
     loadAppointments();
-  }, []);
+  }, [isInitialized]);
 
   const getStatusBadge = (status: AppointmentStatus) => {
     switch (status) {
@@ -138,57 +157,69 @@ export default function AppointmentsListPage() {
   return (
     <AppShell>
       <PageHeader
-        breadcrumbs={[{ label: 'Appointments', href: '/dashboard/appointments' }]}
-        title="Outpatient (OPD) Consultation Schedule"
-        description="Daily appointment calendar, patient check-in queue, and clinical encounter routing"
+        breadcrumbs={[{ label: isPatient ? 'My Appointments' : 'Appointments', href: '/dashboard/appointments' }]}
+        title={isPatient ? 'My Outpatient Consultation Schedule' : 'Outpatient (OPD) Consultation Schedule'}
+        description={
+          isPatient
+            ? 'Your upcoming doctor consultations, clinical OPD bookings, and historical appointments'
+            : 'Daily appointment calendar, patient check-in queue, and clinical encounter routing'
+        }
         actions={
           <Button
             variant="primary"
             leftIcon={<Plus className="w-4 h-4" />}
             onClick={() => router.push('/dashboard/appointments/new')}
           >
-            Book New Appointment
+            {isPatient ? 'Book Doctor Appointment' : 'Book New Appointment'}
           </Button>
         }
       />
 
-      <DataTable
-        data={filteredData}
-        columns={columns}
-        keyExtractor={(a) => a.id}
-        searchPlaceholder="Filter appointments by patient, doctor, or UHID..."
-        isLoading={isLoading}
-        onRowClick={(a) => router.push(`/dashboard/appointments/detail?id=${a.id}`)}
-        emptyTitle="No appointments scheduled"
-        emptyDescription="Schedule a consultation with an active doctor."
-        emptyAction={
-          <Button
-            variant="primary"
-            size="sm"
-            leftIcon={<Plus className="w-4 h-4" />}
-            onClick={() => router.push('/dashboard/appointments/new')}
-          >
-            Book Appointment
-          </Button>
-        }
-        filters={
-          <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs">
-            {['ALL', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'].map((st) => (
-              <button
-                key={st}
-                onClick={() => setStatusFilter(st)}
-                className={`px-2.5 py-1 rounded-md font-medium transition ${
-                  statusFilter === st
-                    ? 'bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-2xs font-semibold'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
-                }`}
-              >
-                {st.replace('_', ' ')}
-              </button>
-            ))}
-          </div>
-        }
-      />
+      {error ? (
+        <ErrorState
+          title={error.includes('Access denied') ? 'Access Restricted' : 'Unable to Load Appointments'}
+          message={error}
+          onRetry={loadAppointments}
+        />
+      ) : (
+        <DataTable
+          data={filteredData}
+          columns={columns}
+          keyExtractor={(a) => a.id}
+          searchPlaceholder={isPatient ? 'Filter appointments by doctor or department...' : 'Filter appointments by patient, doctor, or UHID...'}
+          isLoading={isLoading}
+          onRowClick={(a) => router.push(`/dashboard/appointments/detail?id=${a.id}`)}
+          emptyTitle="No appointments scheduled"
+          emptyDescription={isPatient ? 'You have no scheduled doctor consultations.' : 'Schedule a consultation with an active doctor.'}
+          emptyAction={
+            <Button
+              variant="primary"
+              size="sm"
+              leftIcon={<Plus className="w-4 h-4" />}
+              onClick={() => router.push('/dashboard/appointments/new')}
+            >
+              {isPatient ? 'Book Doctor Consultation' : 'Book Appointment'}
+            </Button>
+          }
+          filters={
+            <div className="flex items-center gap-1.5 bg-slate-100 dark:bg-slate-800 p-1 rounded-lg text-xs">
+              {['ALL', 'CONFIRMED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'].map((st) => (
+                <button
+                  key={st}
+                  onClick={() => setStatusFilter(st)}
+                  className={`px-2.5 py-1 rounded-md font-medium transition ${
+                    statusFilter === st
+                      ? 'bg-white dark:bg-slate-900 text-teal-600 dark:text-teal-400 shadow-2xs font-semibold'
+                      : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                  }`}
+                >
+                  {st.replace('_', ' ')}
+                </button>
+              ))}
+            </div>
+          }
+        />
+      )}
     </AppShell>
   );
 }
