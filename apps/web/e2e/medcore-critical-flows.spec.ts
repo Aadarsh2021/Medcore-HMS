@@ -34,10 +34,10 @@ test.describe('MedCore HMS — Critical E2E Workflows', () => {
     expect(currentUrl.includes('/login') || currentUrl.includes('/dashboard')).toBeTruthy();
   });
 
-  test('4. Appointment scheduling UI route and booking interface structure', async ({ page }) => {
-    await page.goto('/login');
-    // Verify system branding and hospital tenancy indicators
-    await expect(page.locator('text=/Hospital Management System|MedCore/i').first()).toBeVisible();
+  test('4. Appointment scheduling route security and unauthenticated rejection', async ({ page }) => {
+    await page.goto('/dashboard/appointments');
+    await page.waitForURL(/.*login/, { timeout: 10000 });
+    expect(page.url()).toContain('/login');
   });
 
   test('5. Billing and invoice payment route security boundaries', async ({ page }) => {

@@ -9,7 +9,17 @@ async function main() {
   console.log('--- Starting MedCore HMS Realistic Clinical Database Seed ---');
 
   const saltRounds = 10;
-  const defaultPasswordHash = await bcrypt.hash('Password123!', saltRounds);
+  const isProduction = process.env.NODE_ENV === 'production';
+  let demoPassword = process.env.SEED_DEMO_PASSWORD;
+  if (!demoPassword) {
+    if (isProduction) {
+      throw new Error(
+        'PRODUCTION SAFETY GATE: SEED_DEMO_PASSWORD environment variable is required in production environments. Silent fallback to default passwords is prohibited.',
+      );
+    }
+    demoPassword = 'Password123!';
+  }
+  const defaultPasswordHash = await bcrypt.hash(demoPassword, saltRounds);
 
   // 1. Clean existing tables in reverse dependency order
   console.log('Cleaning existing records...');
@@ -1009,7 +1019,7 @@ async function main() {
     AppointmentStatus.COMPLETED,
     AppointmentStatus.CONFIRMED,
     AppointmentStatus.CANCELLED,
-    AppointmentStatus.SCHEDULED,
+    AppointmentStatus.PENDING,
   ];
 
   for (let dayOffset = -14; dayOffset <= 0; dayOffset++) {
@@ -1163,7 +1173,7 @@ async function main() {
   });
 
   console.log('--- MedCore HMS Seed Complete Successfully! ---');
-  console.log('Default Seed User Credentials (all passwords: Password123!):');
+  console.log('Default Seed User Credentials provisioned (Password matches configured SEED_DEMO_PASSWORD or standard local development default):');
   console.log('Super Admin:     superadmin@medcore.io');
   console.log('Hospital Admin:  admin.metro@medcore.io');
   console.log('Doctor:          dr.sharma@metrogeneral.org');

@@ -8,8 +8,24 @@
 
 import { useAuthStore } from '../../stores/authStore';
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+/**
+ * Resolves the backend API base URL.
+ * - In local development: defaults to http://localhost:3001/api if NEXT_PUBLIC_API_URL is unset.
+ * - In production: strictly enforces that NEXT_PUBLIC_API_URL is configured and not empty.
+ */
+export function getApiBaseUrl(): string {
+  const configured = process.env.NEXT_PUBLIC_API_URL;
+  if (configured && configured.trim() !== '') {
+    return configured.trim().replace(/\/+$/, '');
+  }
+  if (process.env.NODE_ENV !== 'production') {
+    return 'http://localhost:3001/api';
+  }
+  throw new ApiError(
+    0,
+    'NEXT_PUBLIC_API_URL is not configured for production. Localhost fallback is disabled.',
+  );
+}
 
 export interface ApiRequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean | undefined>;
@@ -73,7 +89,8 @@ export async function apiClient<T = any>(
 ): Promise<ApiResponse<T>> {
   const { params, hospitalOverrideId, headers: customHeaders, ...fetchOptions } = options;
 
-  let url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
+  const baseUrl = getApiBaseUrl();
+  let url = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint.startsWith('/') ? endpoint : `/${endpoint}`}`;
 
   if (params) {
     const searchParams = new URLSearchParams();

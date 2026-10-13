@@ -91,9 +91,9 @@ async function bootstrap() {
   });
 
   const port = process.env.PORT || 3001;
-  await app.listen(port);
-  logger.log(`MedCore HMS API is running on: http://localhost:${port}/api`);
-  logger.log(`Interactive Swagger Docs available at: http://localhost:${port}/api/docs`);
+  await app.listen(port, '0.0.0.0');
+  logger.log(`MedCore HMS API is running on: http://0.0.0.0:${port}/api`);
+  logger.log(`Interactive Swagger Docs available at: http://0.0.0.0:${port}/api/docs`);
 }
 
 bootstrap();

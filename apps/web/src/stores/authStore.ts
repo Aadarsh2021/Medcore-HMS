@@ -16,7 +16,16 @@ interface AuthState {
   clearError: () => void;
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api';
+function getAuthApiBase(): string | null {
+  const configured = process.env.NEXT_PUBLIC_API_URL;
+  if (configured && configured.trim() !== '') {
+    return configured.trim().replace(/\/+$/, '');
+  }
+  if (process.env.NODE_ENV !== 'production') {
+    return 'http://localhost:3001/api';
+  }
+  return null;
+}
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
@@ -104,22 +113,25 @@ async function fetchProfile(
   sbUser: any,
   set: (state: Partial<AuthState>) => void,
 ) {
-  try {
-    const res = await fetch(`${API_BASE}/auth/me`, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
+  const apiBase = getAuthApiBase();
+  if (apiBase) {
+    try {
+      const res = await fetch(`${apiBase}/auth/me`, {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
 
-    if (res.ok) {
-      const json = await res.json();
-      if (json.data?.user) {
-        set({ user: json.data.user });
-        return;
+      if (res.ok) {
+        const json = await res.json();
+        if (json.data?.user) {
+          set({ user: json.data.user });
+          return;
+        }
       }
+    } catch {
+      // Backend API may be initializing or network error; gracefully fallback to metadata
     }
-  } catch {
-    // Backend API may be initializing or local; gracefully fallback to metadata
   }
 
   // Fallback to Supabase User metadata

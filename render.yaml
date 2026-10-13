@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: medcore-hms-api
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: pnpm install --frozen-lockfile && pnpm run build:api
+    startCommand: pnpm run start:api
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: CORS_ORIGINS
+        value: https://medcore-hms-eea8e.web.app,https://medcore-hms-eea8e.firebaseapp.com
+      - key: SUPABASE_URL
+        value: https://ihpjezapyznhzbhxfrvu.supabase.co
+      - key: SUPABASE_ANON_KEY
+        value: sb_publishable_4PWubQVpA5UHZMVJfmHHgA_HP0qBw9S
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: COOKIE_SECRET
+        generateValue: true

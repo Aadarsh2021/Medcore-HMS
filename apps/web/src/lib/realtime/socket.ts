@@ -9,10 +9,14 @@ export interface SocketConnectionOptions {
 
 export function getRealtimeSocket(options: SocketConnectionOptions): Socket {
   const defaultUrl = process.env.NEXT_PUBLIC_API_URL
-    ? process.env.NEXT_PUBLIC_API_URL.replace(/\/api$/, '')
-    : 'http://localhost:3001';
+    ? process.env.NEXT_PUBLIC_API_URL.replace(/\/api\/?$/, '')
+    : (process.env.NODE_ENV !== 'production' ? 'http://localhost:3001' : '');
 
   const baseUrl = options.url || defaultUrl;
+
+  if (!baseUrl) {
+    return io({ autoConnect: false });
+  }
 
   if (socketInstance) {
     // If token has changed, update auth token and reconnect

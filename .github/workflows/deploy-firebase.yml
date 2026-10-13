@@ -38,12 +38,23 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm exec prisma generate --schema=prisma/schema.prisma
 
+      - name: Validate Production API Configuration
+        run: |
+          API_URL="${{ vars.NEXT_PUBLIC_API_URL || secrets.NEXT_PUBLIC_API_URL }}"
+          if [ -z "$API_URL" ]; then
+            echo "::error::NEXT_PUBLIC_API_URL is missing. Production Firebase deployment requires the deployed Render backend API URL (e.g. https://<render-service-name>.onrender.com/api)."
+            echo "Please configure NEXT_PUBLIC_API_URL in GitHub Repository Variables (Settings -> Secrets and variables -> Actions -> Variables)."
+            exit 1
+          fi
+          echo "Production API URL configuration verified."
+
       - name: Build Monorepo
         run: |
           pnpm --filter @medcore/types build
           pnpm --filter @medcore/api build
           pnpm --filter @medcore/web build
         env:
+          NEXT_PUBLIC_API_URL: ${{ vars.NEXT_PUBLIC_API_URL || secrets.NEXT_PUBLIC_API_URL }}
           NEXT_PUBLIC_SUPABASE_URL: "https://ihpjezapyznhzbhxfrvu.supabase.co"
           NEXT_PUBLIC_SUPABASE_ANON_KEY: "sb_publishable_4PWubQVpA5UHZMVJfmHHgA_HP0qBw9S"
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: "medcore-hms-eea8e"
