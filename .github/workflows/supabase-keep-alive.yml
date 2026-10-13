@@ -2,8 +2,8 @@ name: Supabase Database Keep-Alive Heartbeat
 
 on:
   schedule:
-    # Runs every 2 days at 04:00 UTC (well within Supabase's 7-day inactivity pause window)
-    - cron: '0 4 */2 * *'
+    # Runs daily at 04:00 UTC to maintain continuous database activity
+    - cron: '0 4 * * *'
   workflow_dispatch: # Allows manual one-click trigger from GitHub Actions tab
 
 jobs:
@@ -11,21 +11,22 @@ jobs:
     name: Keep Supabase Project Active
     runs-on: ubuntu-latest
     steps:
-      - name: 1. Ping Supabase API Gateway (curl)
+      - name: 1. Ping Supabase REST API & Wake PostgREST
         continue-on-error: true
         run: |
-          echo "Sending HTTP heartbeat to Supabase Gateway..."
+          echo "Sending HTTP query to Supabase PostgREST Gateway..."
           STATUS=$(curl -s --retry 3 --retry-delay 2 -o /dev/null -w "%{http_code}" \
             -H "apikey: sb_publishable_4PWubQVpA5UHZMVJfmHHgA_HP0qBw9S" \
-            "https://ihpjezapyznhzbhxfrvu.supabase.co/auth/v1/health" || echo "000")
-          echo "Supabase Auth Gateway HTTP Code: $STATUS"
+            -H "Authorization: Bearer sb_publishable_4PWubQVpA5UHZMVJfmHHgA_HP0qBw9S" \
+            "https://ihpjezapyznhzbhxfrvu.supabase.co/rest/v1/Hospital?select=id&limit=1" || echo "000")
+          echo "Supabase PostgREST HTTP Code: $STATUS"
           if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
-            echo "✅ Supabase HTTP Gateway is online!"
+            echo "✅ Supabase REST API query successfully executed! Activity registered."
           else
-            echo "⚠️ Gateway ping returned $STATUS (non-fatal, proceeding to database query)"
+            echo "⚠️ Gateway ping returned $STATUS (non-fatal, proceeding to direct database query)"
           fi
 
-      - name: 2. Ping PostgreSQL Database Directly (psql)
+      - name: 2. Query PostgreSQL Database Directly (psql)
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
@@ -34,10 +35,10 @@ jobs:
             exit 1
           fi
 
-          echo "Executing lightweight SQL query on Supabase PostgreSQL..."
+          echo "Executing real table query on Supabase PostgreSQL..."
           for i in 1 2 3; do
-            if psql "$DATABASE_URL" -c "SELECT 1 as ping, current_timestamp as server_time;"; then
-              echo "✅ PostgreSQL Heartbeat successfully registered! Database will stay active."
+            if psql "$DATABASE_URL" -c "SELECT count(*) as total_hospitals, current_timestamp as ping_time FROM \"Hospital\";"; then
+              echo "✅ PostgreSQL Heartbeat successfully registered! Real table queried, database active."
               exit 0
             fi
             echo "Attempt $i failed, retrying in 5 seconds..."
