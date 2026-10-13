@@ -1,0 +1,27 @@
+name: Render & Backend Keep-Alive Heartbeat
+
+on:
+  schedule:
+    # Runs every 14 minutes to prevent Render free tier from sleeping (Render spins down after 15 minutes of inactivity)
+    - cron: '*/14 * * * *'
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    name: Ping Render API Health
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Backend Health Endpoint
+        env:
+          API_URL: ${{ vars.NEXT_PUBLIC_API_URL || 'https://medcore-hms-api.onrender.com/api' }}
+        run: |
+          HEALTH_URL="${API_URL%/}/health"
+          echo "Pinging Render backend health at: $HEALTH_URL"
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}\nTIME_TOTAL:%{time_total}" "$HEALTH_URL" || true)
+          echo "$RESPONSE"
+          STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d':' -f2)
+          if [ "$STATUS" = "200" ]; then
+            echo "✅ Render Web Service is warm, responsive, and active!"
+          else
+            echo "⚠️ Heartbeat ping status: $STATUS"
+          fi
