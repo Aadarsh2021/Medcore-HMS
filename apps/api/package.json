@@ -17,7 +17,11 @@
     "prisma:generate": "prisma generate --schema=../../prisma/schema.prisma",
     "prisma:push": "prisma db push --schema=../../prisma/schema.prisma",
     "prisma:migrate": "prisma migrate dev --schema=../../prisma/schema.prisma",
-    "prisma:seed": "tsx ../../prisma/seed.ts"
+    "prisma:seed": "tsx ../../prisma/seed.ts",
+    "db:generate": "prisma generate --schema=../../prisma/schema.prisma",
+    "db:push": "prisma db push --schema=../../prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema=../../prisma/schema.prisma",
+    "db:seed": "tsx ../../prisma/seed.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1146.0",
