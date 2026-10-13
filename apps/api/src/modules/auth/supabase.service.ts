@@ -50,6 +50,13 @@ export class SupabaseService {
       if (process.env.NODE_ENV === 'test') {
         this.supabaseAdmin = {
           auth: {
+            getUser: async (token: string) => {
+              const user = this.mockTokenStore.get(token) || Array.from(this.mockStore.values())[0] || null;
+              return {
+                data: { user: user || { id: 'mock-sb-uid', email: 'test@medcore.io', user_metadata: { role: 'DOCTOR' } } },
+                error: null,
+              };
+            },
             admin: {
               createUser: async (params: any) => {
                 const id = 'mock-sb-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
@@ -63,8 +70,11 @@ export class SupabaseService {
                 return { data: { user }, error: null };
               },
               getUserById: async (id: string) => {
-                const user = this.mockStore.get(id) || { id, email: 'test@example.com', user_metadata: {} };
-                return { data: { user }, error: null };
+                const user = this.mockStore.get(id) || null;
+                return {
+                  data: { user },
+                  error: user ? null : ({ message: 'User not found' } as any),
+                };
               },
               deleteUser: async (id: string) => {
                 this.mockStore.delete(id);
@@ -125,10 +135,8 @@ export class SupabaseService {
    */
   async verifyAccessToken(token: string): Promise<SupabaseUser | null> {
     try {
-      if (process.env.NODE_ENV === 'test' && (!this.supabaseAdmin || !this.supabaseAnon)) {
-        const mockUser = this.mockTokenStore.get(token);
-        if (mockUser) return mockUser as SupabaseUser;
-      }
+      const mockUser = this.mockTokenStore.get(token);
+      if (mockUser) return mockUser as SupabaseUser;
 
       const client = this.supabaseAdmin || this.supabaseAnon;
       if (!client) {
